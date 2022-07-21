@@ -1,2 +1,2 @@
 # twitter
-repository with code for the figures/viz/analysis on my twitter page @WisconsinStats
+the analysis on my twitter page @WisconsinStats comes from this repo
