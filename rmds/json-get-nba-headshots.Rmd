@@ -1,0 +1,51 @@
+---
+title: "Untitled"
+author: "Myles Thomas"
+date: "1/11/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+
+```
+
+```{r}
+library(tidyverse)
+library(RJSONIO)
+library(RCurl)
+
+# grab the data
+raw_data <- "https://api.sportsdata.io/v3/nba/scores/json/Players?key=0d30de8e6f7f4d1583e2a4f46f4b12d9"
+# Then covert from JSON into a list in R
+data <- fromJSON(raw_data)
+length(data)
+
+# We can coerce this to a data.frame
+final_data <- do.call(rbind, data)
+
+# Then write it to a flat csv file
+write.csv(final_data, "C:/Users/Myles/OneDrive/Documents/GitHubThings/shot-quality/new-data/nba-headshots.csv")
+
+# peek
+df <- readr::read_csv("C:/Users/Myles/OneDrive/Documents/GitHubThings/shot-quality/new-data/nba-headshots.csv")
+df
+
+# add in players name
+df <- df %>%
+  mutate(players = paste(FirstName, LastName, sep = " ")) %>%
+  select(players, PlayerID:NbaDotComPlayerID) %>%
+  rename(headshot = PhotoUrl)
+
+# write again
+write.csv(df, "C:/Users/Myles/OneDrive/Documents/GitHubThings/shot-quality/new-data/nba-headshots.csv")
+
+# peek
+df %>%
+  select(players, headshot)
+```

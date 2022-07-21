@@ -1,0 +1,640 @@
+---
+title: "celtics-historic-shooting-night"
+author: "Myles Thomas"
+date: "12/30/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+
+```{r more setup}
+# Load libraries
+library(tidyverse)
+library(gt)
+library(tidymodels)
+library(ggthemes)
+library(ggtext)
+library(stringi)
+library(gt)
+library(rmarkdown)
+library(rlang)
+library(ggimage)
+asp_ratio <- 16/9
+
+# Files with nba team logos, colors, etc
+team_info <- read.csv("C:/Users/Myles/OneDrive/Documents/GitHubThings/twitter/datasets/nba-team-logos-and-colors.csv")
+
+headshots <- readxl::read_excel("C:/Users/Myles/OneDrive/Documents/GitHubThings/twitter/datasets/nba-player-info-headshots.xlsx", sheet = 1)
+
+# GT functions
+gt_theme_538 <- function(data,...) {
+  data %>%
+  opt_all_caps()  %>%
+  opt_table_font(
+    font = list(
+      google_font("Chivo"),
+      default_fonts()
+    )
+  ) %>%
+    tab_style(
+      style = cell_borders(
+        sides = "bottom", color = "transparent", weight = px(2)
+      ),
+      locations = cells_body(
+        columns = everything(),
+        # This is a relatively sneaky way of changing the bottom border
+        # Regardless of data size
+        rows = nrow(data$`_data`)
+      )
+    )  %>% 
+  tab_options(
+    column_labels.background.color = "white",
+    table.border.top.width = px(3),
+    table.border.top.color = "transparent",
+    table.border.bottom.color = "transparent",
+    table.border.bottom.width = px(3),
+    column_labels.border.top.width = px(3),
+    column_labels.border.top.color = "transparent",
+    column_labels.border.bottom.width = px(3),
+    column_labels.border.bottom.color = "black",
+    data_row.padding = px(3),
+    source_notes.font.size = 12,
+    table.font.size = 16,
+    heading.align = "left",
+    ...
+  ) 
+}
+
+gt_theme_espn <- function(data, ...){
+  data %>% 
+    opt_all_caps()  %>%
+    opt_table_font(
+      font = list(
+        google_font("Lato"),
+        default_fonts()
+      )
+    )  %>% 
+    opt_row_striping() %>% 
+    tab_options(
+      row.striping.background_color = "#fafafa",
+      table_body.hlines.color = "#f6f7f7",
+      source_notes.font.size = 12,
+      table.font.size = 16,
+      table.width = px(925),
+      heading.align = "left",
+      heading.title.font.size = 24,
+      table.border.top.color = "transparent",
+      table.border.top.width = px(3),
+      data_row.padding = px(7),
+      ...
+    ) 
+}
+
+# Set a theme
+theme_set(theme_bw() +
+            theme(plot.title = element_text(face = "bold", size = 28/.pt, hjust = 0),
+                  plot.subtitle = element_text(face = "italic", size = 24/.pt),
+                  strip.background = element_rect(color = "black", fill = "#C0C0C0", size = 3.5, linetype = "blank"),
+                  strip.text = element_text(face = "bold", size = 24/.pt),
+                  panel.grid.minor.x = element_blank(),
+                  panel.grid.minor.y = element_blank(),
+                  panel.border = element_blank(),
+                  axis.ticks = element_blank(),
+                  axis.text = element_text(size = 24/.pt),
+                  axis.title = element_text(face = "bold", size = 26/.pt),
+                  plot.caption = element_text(face = "italic", size = 20/.pt),
+                  legend.title = element_text(size = 24/.pt),
+                  legend.text = element_text(size = 20/.pt),
+                  legend.key.size = unit(0.75, "lines")))
+```
+
+
+```{r calc shots taken}
+# load player by player data
+df <- readr::read_csv("data/player_data.csv")
+
+# add up number of 2pt / 3pt and FT's taken
+t <- df %>%
+  select(Players, `Shot Attempts`, `Free Throw Attempts`) %>%
+  summarise(shots = sum(`Shot Attempts`),
+            fts = sum(`Free Throw Attempts`))
+
+t[1,1] + t[1,2]
+```
+
+
+```{r peaking at data, include=FALSE, layout="l-body-outset", echo=FALSE}
+
+# Let’s start by first reading in game summary data by team from 2021 from the ShotQuality database.
+
+nba_team_data <-
+  readr::read_csv("data/team_data.csv") %>%
+  select(-c(X1, ends_with("diff"))) %>%
+  arrange(Logos, games_ids)
+
+nba_team_data
+```
+
+
+```{r}
+# grab the columns I will be working with (for the most part)
+
+df <- nba_team_data %>%
+  select(Logos, games_ids, `3PT FG% Expected`:`3PT FG% Difference`, `3PT Attempts`) %>%
+  mutate(Makes = `3PT Attempts`*`3PT FG%`,
+         "Makes Expected" = `3PT Attempts`*`3PT FG% Expected`) %>%
+  mutate_at(.vars = vars(`Makes`:`Makes Expected`), .funs = function(x) {floor(x)}) %>%
+  mutate("Makes Difference" = `Makes` - `Makes Expected`) %>%
+  janitor::clean_names()
+
+df
+```
+
+
+```{r}
+df %>%
+  filter(makes <= 4)
+```
+
+```{r}
+# looking at team colors
+team_info %>% slice(2)
+```
+
+
+
+
+```{r}
+# add URLs
+#df$url <- "C:/Users/Myles/OneDrive/Documents/GitHubThings/shot-quality/data-viz/pngs/nba_logo.png"
+df$url <- NA
+
+df[df$makes_difference == -12, "url"] <- "https://www.nba.com/stats/media/img/teams/logos/BOS_logo.svg"
+
+df %>% 
+  filter(makes_difference == -12) %>%
+  select(url)
+```
+
+
+```{r, warning=FALSE}
+df %>%
+  ggplot() + 
+  geom_dotplot(aes(x = makes_difference, colour = makes_difference, fill = makes_difference)) + 
+  scale_fill_gradient2(low = "red", high = "green", mid = "white") + 
+  scale_colour_gradient2(low = "red", high = "green", mid = "white") 
+  
+```
+
+
+
+
+```{r}
+# Set a theme
+theme_set(theme_bw() +
+            theme(plot.title = element_text(face = "bold", size = 45, hjust = 0),
+                  plot.subtitle = element_text(face = "italic", size = 24/.pt),
+                  strip.background = element_rect(color = "black", fill = "#C0C0C0", size = 3.5, linetype = "blank"),
+                  strip.text = element_text(face = "bold", size = 24/.pt),
+                  panel.grid.minor.x = element_blank(),
+                  panel.grid.minor.y = element_blank(),
+                  panel.border = element_blank(),
+                  axis.ticks = element_blank(),
+                  axis.text = element_text(size = 24/.pt),
+                  axis.title = element_text(face = "bold", size = 26/.pt),
+                  plot.caption = element_text(face = "italic", size = 20/.pt),
+                  legend.title = element_text(size = 24/.pt),
+                  legend.text = element_text(size = 20/.pt),
+                  legend.key.size = unit(0.75, "lines")))
+```
+
+
+```{r}
+asp_ratio <- 16/9
+
+### Basic ggplot setup
+p <- ggplot(df, aes(x=makes_difference)) 
+
+## Histogram -- fill scales with my axis limits (desired)
+p2 <- p + geom_histogram(color="black",
+aes(fill = ..x..)) +
+scale_x_continuous(limits=c(-12,12)) +
+scale_fill_gradient2(
+    low = "red3", high = "darkgreen",
+    mid = "white", midpoint=0) + 
+  labs(x = "3PT makes over expected",
+       y = "",
+       title = "Distribution of 3PT Shooting Relative to Expectation",
+       subtitle = "2021-2022 season",
+       caption = "Figure: @Shot_Quality"
+       )  +
+  theme_fivethirtyeight() +
+  theme_classic() +
+  theme(plot.title = element_text(face = "bold", size = 30/.pt, hjust = 0),
+                  plot.subtitle = element_text(face = "italic", size = 24/.pt),
+                  strip.background = element_rect(color = "black", fill = "#C0C0C0", size = 3.5, linetype = "blank"),
+                  strip.text = element_text(face = "bold", size = 24/.pt),
+                  panel.grid.minor.x = element_blank(),
+                  panel.grid.minor.y = element_blank(),
+                  panel.border = element_blank(),
+                  axis.ticks = element_blank(),
+                  axis.text = element_text(size = 24/.pt),
+                  axis.title = element_text(face = "bold", size = 26/.pt),
+                  plot.caption = element_text(face = "italic", size = 20/.pt),
+                  legend.title = element_text(size = 24/.pt),
+                  legend.text = element_text(size = 20/.pt),
+                  legend.key.size = unit(0.75, "lines"),
+        aspect.ratio = 1/asp_ratio,
+        legend.position = "none") +
+ 
+  # Add arrow
+  geom_segment(aes(x = -10, y = 45, xend = -11.5, yend = 12),
+                  arrow = arrow(length = unit(0.5, "cm")))
+
+p2
+# save
+
+ggplot2::ggsave(
+  filename = "viz/celtics-bad-night.png",
+  plot = p2,
+  height = 5,
+  width = 5*asp_ratio,
+  dpi = "retina"
+)
+
+```
+
+
+
+
+```{r}
+p + geom_dotplot(color="black",
+aes(fill = ..x..)) +
+scale_x_continuous()+
+  scale_fill_gradient2(
+    low = "red3", high = "darkgreen",
+    mid = "white", midpoint=0,
+    limits = c(-12, 12))
+
+scale_fill_gradient2(
+    low = "blue", high = "red",
+    mid = "white", midpoint = 6, 
+    limits = c(2, 10))
+```
+
+```{r}
+# Set a theme
+theme_set(theme_bw() +
+            theme(plot.title = element_text(face = "bold", size = 30/.pt, hjust = 0),
+                  plot.subtitle = element_text(face = "italic", size = 24/.pt),
+                  strip.background = element_rect(color = "black", fill = "#C0C0C0", size = 3.5, linetype = "blank"),
+                  strip.text = element_text(face = "bold", size = 24/.pt),
+                  panel.grid.minor.x = element_blank(),
+                  panel.grid.minor.y = element_blank(),
+                  panel.border = element_blank(),
+                  axis.ticks = element_blank(),
+                  axis.text = element_text(size = 24/.pt),
+                  axis.title = element_text(face = "bold", size = 26/.pt),
+                  plot.caption = element_text(face = "italic", size = 20/.pt),
+                  legend.title = element_text(size = 24/.pt),
+                  legend.text = element_text(size = 20/.pt),
+                  legend.key.size = unit(0.75, "lines")))
+```
+
+
+```{r}
+df %>%
+  mutate(perc = makes / x3pt_attempts) %>%
+  ggplot(aes(x = makes, y = perc)) + 
+  geom_point() +
+  #geom_image(aes(image = url), size = 0.05, by = "width", asp = asp_ratio) + 
+  labs(x = "3PT makes",
+       y = "Accuracy (%)",
+       title = "3PT Makes vs Accuracy",
+       subtitle = "2021-2022 season",
+       caption = "Figure: @Shot_Quality"
+       ) + 
+  theme(
+    axis.title.x = element_text(hjust = .9),
+    axis.title.y = element_text(hjust = .9) # t, r, b, l
+  )
+
+
+```
+
+
+
+
+```{r}
+p3 <- df %>%
+  mutate(perc = makes / x3pt_attempts) %>%
+  ggplot(aes(x = makes, y = perc)) + 
+  geom_point() +
+  geom_image(aes(image = url), size = 0.05, by = "width", asp = asp_ratio) + 
+  labs(x = "3PT makes",
+       y = "Accuracy (%)",
+       title = "3PT Makes vs Accuracy",
+       subtitle = "2021-2022 season",
+       caption = "Figure: @Shot_Quality"
+       )  +
+  theme_fivethirtyeight() +
+  theme_classic() +
+  theme(plot.title = element_text(face = "bold", size = 30/.pt, hjust = 0),
+                  plot.subtitle = element_text(face = "italic", size = 24/.pt),
+                  strip.background = element_rect(color = "black", fill = "#C0C0C0", size = 3.5, linetype = "blank"),
+                  strip.text = element_text(face = "bold", size = 24/.pt),
+                  panel.grid.minor.x = element_blank(),
+                  panel.grid.minor.y = element_blank(),
+                  panel.border = element_blank(),
+                  axis.ticks = element_blank(),
+                  axis.text = element_text(size = 24/.pt),
+                  axis.title = element_text(face = "bold", size = 26/.pt),
+                  plot.caption = element_text(face = "italic", size = 20/.pt),
+                  legend.title = element_text(size = 24/.pt),
+                  legend.text = element_text(size = 20/.pt),
+                  legend.key.size = unit(0.75, "lines"),
+        #aspect.ratio = 1/asp_ratio,
+        legend.position = "none",
+    axis.title.x = element_text(hjust = .5),
+    axis.title.y = element_text(hjust = .5))  +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10))
+
+p3
+# save
+
+ggplot2::ggsave(
+  filename = "viz/celtics-bad-night3.png",
+  plot = p3,
+  height = 5,
+  width = 5*asp_ratio,
+  dpi = "retina"
+)
+
+```
+
+
+```{r}
+# getting percentile outcomes
+df
+
+x = df$x3pt_fg_percent
+quantile(x, probs = c(0.001))
+
+x <- df$x3pt_fg_percent
+quantile(x, probs = c(.6))
+
+```
+
+
+```{r}
+# fixing expected rounding
+df
+
+df2 <- table(df$makes_expected) %>% as.data.frame() %>%
+  mutate_all(.funs = as.numeric)
+
+df2
+```
+
+```{r}
+p <- ggplot(df2, aes(x=Var1, y = Freq))
+
+p + geom_col()
+
+p + 
+  geom_col(aes(fill = Freq)) +
+scale_x_continuous(limits=c(5,22)) +
+scale_fill_gradient2(
+    low = "red3", high = "darkgreen",
+    mid = "white", midpoint=12.5)
+
+df2 %>%
+  ggplot(aes(Var1, y = Freq, fill = ))
+```
+
+
+
+```{r}
+### Basic ggplot setup
+#p <- ggplot(df2, aes(x=Var1, y = Freq)) 
+
+### Basic ggplot setup
+p <- ggplot(df, aes(x=makes_expected)) 
+
+## Histogram -- fill scales with my axis limits (desired)
+p4 <- p + 
+  geom_histogram(color="black", aes(fill = ..x..), binwidth = 1) +
+scale_x_continuous(limits=c(5,22)) +
+scale_fill_gradient2(
+    low = "red3", high = "darkgreen",
+    mid = "white", midpoint=12) + 
+  labs(x = "Expectated Makes",
+       y = "Count of Occurences",
+       title = "Distribution of 3PT Makes Expected",
+       subtitle = "2021-2022 season",
+       caption = "Figure: @Shot_Quality"
+       )  +
+  theme_fivethirtyeight() +
+  theme_classic() +
+  theme(plot.title = element_text(face = "bold", size = 30/.pt, hjust = 0),
+                  plot.subtitle = element_text(face = "italic", size = 24/.pt),
+                  strip.background = element_rect(color = "black", fill = "#C0C0C0", size = 3.5, linetype = "blank"),
+                  strip.text = element_text(face = "bold", size = 24/.pt),
+                  panel.grid.minor.x = element_blank(),
+                  panel.grid.minor.y = element_blank(),
+                  panel.border = element_blank(),
+                  axis.ticks = element_blank(),
+                  axis.text = element_text(size = 24/.pt),
+                  axis.title = element_text(face = "bold", size = 26/.pt),
+                  plot.caption = element_text(face = "italic", size = 20/.pt),
+                  legend.title = element_text(size = 24/.pt),
+                  legend.text = element_text(size = 20/.pt),
+                  legend.key.size = unit(0.75, "lines"),
+        aspect.ratio = 1/asp_ratio,
+        legend.position = "none",
+        axis.title.x = element_text(hjust = .5),
+        axis.title.y = element_text(hjust = .5)
+        ) +
+ 
+  # Add arrow
+  geom_segment(aes(x = 17.4, y = 100, xend = 16.2, yend = 65),
+                  arrow = arrow(length = unit(0.5, "cm")))
+
+p4
+# save
+
+ggplot2::ggsave(
+  filename = "viz/celtics-bad-night4.png",
+  plot = p4,
+  height = 5,
+  width = 5*asp_ratio,
+  dpi = "retina"
+)
+
+```
+
+
+```{r}
+nba_team_data <-
+  readr::read_csv("../data/team_data.csv") %>%
+  select(-c(X1, ends_with("diff"))) %>%
+  arrange(-game_id) %>%
+  janitor::clean_names()
+
+nba_team_data
+```
+```{r}
+p_data <- nba_team_data %>% 
+  dplyr::group_by(teams) %>% 
+  dplyr::mutate(game_number = dplyr::row_number()) %>%
+  dplyr::ungroup() %>%
+  #dplyr::select(teams:points_difference, game_number) %>%
+  dplyr::filter(game_number %in% 1:5) %>%
+  dplyr::arrange(dplyr::desc(points_difference)) %>%
+  dplyr::select(-c(games_ids, game_number)) %>%
+  left_join(team_info, by = c("logos" = "name")) %>%
+  mutate(logos = reorder(logos, points_expected),
+         primary = as.factor(primary))
+
+p_data
+```
+
+
+```{r}
+p_data2 <- nba_team_data %>% 
+  dplyr::group_by(teams) %>% 
+  dplyr::mutate(game_number = dplyr::row_number()) %>%
+  dplyr::ungroup() %>%
+  #dplyr::filter(game_number %in% 1:5) %>%
+  group_by(teams) %>%
+  summarise(games = n(),
+            possessions_per = mean(possessions),
+            pred = mean(points_expected),
+            obs = mean(points_scored),
+            pred_ppp = pred / possessions_per,
+            obs_ppp  = obs / possessions_per,
+            ppp_diff = pred_ppp - obs_ppp,
+            .groups = "drop") %>%
+  left_join(team_info, by = c("teams" = "name")) %>%
+  mutate(teams = reorder(teams, pred_ppp),
+         primary = as.factor(primary)) %>%
+  dplyr::arrange(dplyr::desc(pred_ppp))
+
+p_data2
+```
+
+
+```{r}
+p5 <- p_data2 %>%
+  ggplot() + 
+  scale_color_identity(aesthetics =  c("fill", "color")) +
+  coord_cartesian(xlim = c(.9, 1.3)) +
+  geom_errorbarh(aes(y = teams, xmin = pred_ppp, xmax = pred_ppp-ppp_diff, color = primary)) +
+  geom_point(aes(x = obs_ppp, y = teams, color = primary), size = 3) + 
+  ggimage::geom_image(aes(x = pred_ppp, y = teams, image = logo_url), size = 0.03, by = "width", asp = asp_ratio) + 
+  labs(x = "",
+       y = "",
+       title = "Points per Possession Expected vs Scored",
+       subtitle = "Recent 5 Game Bucket. Team Logo = PPP Expected, Dot = PPP Scored (Bar going right = shooting better than predicted based on ShotQuality)",
+       caption = "Figure: @Shot_Quality"
+       )  +
+  theme_fivethirtyeight() +
+  theme_classic() +
+  theme(plot.title = element_text(face = "bold", size = 30/.pt, hjust = 0),
+                  plot.subtitle = element_text(face = "italic", size = 24/.pt),
+                  strip.background = element_rect(color = "black", fill = "#C0C0C0", size = 3.5, linetype = "blank"),
+                  strip.text = element_text(face = "bold", size = 24/.pt),
+                  panel.grid.minor.x = element_blank(),
+                  panel.grid.minor.y = element_blank(),
+                  panel.border = element_blank(),
+                  axis.ticks = element_blank(),
+                  axis.text = element_text(size = 24/.pt),
+                  axis.title = element_text(face = "bold", size = 26/.pt),
+                  plot.caption = element_text(face = "italic", size = 20/.pt),
+                  legend.title = element_text(size = 24/.pt),
+                  legend.text = element_text(size = 20/.pt),
+                  legend.key.size = unit(0.75, "lines"),
+        aspect.ratio = 1/asp_ratio,
+        legend.position = "none"
+        ) + 
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 6))
+
+p5
+# save
+ggplot2::ggsave(
+  filename = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/most-recent-games-error-bar-plot.png",
+  plot = p5,
+  height = 8,
+  width = 8*asp_ratio,
+  dpi = "retina"
+)
+```
+
+
+```{r}
+p_data2 %>%
+  dplyr::arrange(dplyr::desc(obs_ppp)) %>%
+  dplyr::mutate(teams = reorder(teams, obs_ppp),
+                primary = ifelse(ppp_diff >= 0, "darkgreen", "red4")) 
+
+p_data2 %>%
+  dplyr::arrange(dplyr::desc(obs_ppp)) %>%
+  dplyr::mutate(teams = reorder(teams, obs_ppp),
+                primary = ifelse(ppp_diff >= 0, "darkgreen", "red4")) %>%
+  ggplot() + 
+  scale_color_identity(aesthetics =  c("fill", "color")) +
+  coord_cartesian(xlim = c(.9, 1.3)) +
+  geom_errorbarh(aes(y = teams, xmin = pred_ppp, xmax = pred_ppp-ppp_diff, color = primary), height = 0.15) +
+  geom_point(aes(x = pred_ppp, y = teams, color = primary), size = 3.33) + 
+  ggimage::geom_image(aes(x = obs_ppp, y = teams, image = logo_url), size = 0.029, by = "width", asp = asp_ratio) + 
+  labs(x = "",
+       y = "",
+       title = "Points per Possession Scored vs Expected",
+       subtitle = "Ranked by PPP. Team Logo = PPP, Dot = PPP Expected",
+       caption = "Figure: @Shot_Quality"
+       )  +
+  theme_fivethirtyeight() +
+  theme_classic() +
+  theme(plot.title = element_text(face = "bold", size = 30/.pt, hjust = 0),
+                  plot.subtitle = element_text(face = "italic", size = 24/.pt),
+                  strip.background = element_rect(color = "black", fill = "#C0C0C0", size = 3.5, linetype = "blank"),
+                  strip.text = element_text(face = "bold", size = 24/.pt),
+                  panel.grid.minor.x = element_blank(),
+                  panel.grid.minor.y = element_blank(),
+                  panel.border = element_blank(),
+                  axis.ticks = element_blank(),
+                  axis.text = element_text(size = 24/.pt),
+                  axis.title = element_text(face = "bold", size = 26/.pt),
+                  plot.caption = element_text(face = "italic", size = 20/.pt),
+                  legend.title = element_text(size = 24/.pt),
+                  legend.text = element_text(size = 20/.pt),
+                  legend.key.size = unit(0.75, "lines"),
+        aspect.ratio = 1/asp_ratio,
+        legend.position = "none"
+        ) + 
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 6))
+
+ggplot2::ggsave(
+  filename = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/most-recent-games-error-bar-plot.png",
+  height = 6,
+  width = 6*asp_ratio,
+  dpi = "retina"
+)
+
+```
+```{r}
+nba_team_data %>% 
+  dplyr::group_by(teams) %>% 
+  dplyr::mutate(game_number = dplyr::row_number()) %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(game_number %in% 1:5) %>%
+  dplyr::filter(teams == "Dallas Mavericks")
+```
+

@@ -1,0 +1,2629 @@
+---
+title: "Untitled"
+author: "Myles Thomas"
+date: "1/4/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = F)
+```
+
+
+
+```{r}
+# Load libraries
+library(tidyverse)
+library(gt)
+library(tidymodels)
+library(ggthemes)
+library(ggtext)
+library(stringi)
+library(gt)
+library(rmarkdown)
+library(rlang)
+options(scipen = 99999)
+
+# get ncaa data
+team <- readr::read_csv("../data/ncaa/team.csv") %>% janitor::clean_names() %>% dplyr::mutate(date = lubridate::dmy(date)) %>%
+  mutate(points_difference = points_expected - points_scored)
+player <- readr::read_csv("../data/ncaa/player.csv") %>% janitor::clean_names() %>% dplyr::mutate(date = lubridate::dmy(date))
+team_accurate_game_stats <- readr::read_csv("../data/ncaa/s3/RUNNING_Adj_full_team_stats.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::mutate(date = lubridate::dmy(date)) %>%
+  rename(points_expected = sq_points,
+         points_scored = points) %>%
+  mutate(points_difference = points_expected - points_scored) %>%
+  select(teams:possessions, points_expected, points_scored, points_difference, date, game_id) %>%
+  filter(points_scored > 10) 
+
+t1 <- team_accurate_game_stats %>%
+  arrange(game_id, teams)
+t2 <- team_accurate_game_stats %>%
+  arrange(game_id, dplyr::desc(teams)) %>%
+  rename(opponent = teams) %>%
+  select(c(opponent, points_scored, points_expected)) %>%
+  rename("points_allowed" = points_scored,
+         "points_allowed_expected" = points_expected)
+matchups <- dplyr::bind_cols(t1, t2) %>%
+  mutate(game_mov = points_scored - points_allowed) %>%
+  mutate(game_mov_expected = points_expected - points_allowed_expected) %>%
+  mutate(win = ifelse(game_mov > 0, 1, 0),
+         win_expectation = ifelse(game_mov_expected > 0, 1, 0)) %>%
+  filter(points_scored > 10) 
+
+today <- lubridate::today()
+yesterday <- today - 1
+asp_ratio <- 16/9
+lower_bound <- .05
+upper_bound <- .95
+
+
+# Files with nba team logos, colors, etc
+ncaa_teams <- readr::read_csv("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/a/ncaa-teams.csv")
+ncaa_logos <- readr::read_csv("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/a/ncaa-logos.csv")
+power_five_names <- c("ACC", "Big 12", "Big Ten", "Pac-12", "SEC")
+
+running_player <- readr::read_csv("../data/ncaa/s3/Running_Player_Analysis.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::mutate(date = lubridate::dmy(date)) %>%
+  mutate_at("players", Upper_Case_Names) %>%
+  mutate(good_pos_rate = good_possessions / (good_possessions + bad_possessions))
+
+# GT functions
+gt_theme_538 <- function(data,...) {
+  data %>%
+  opt_all_caps()  %>%
+  opt_table_font(
+    font = list(
+      google_font("Chivo"),
+      default_fonts()
+    )
+  ) %>%
+    tab_style(
+      style = cell_borders(
+        sides = "bottom", color = "transparent", weight = px(2)
+      ),
+      locations = cells_body(
+        columns = everything(),
+        # This is a relatively sneaky way of changing the bottom border
+        # Regardless of data size
+        rows = nrow(data$`_data`)
+      )
+    )  %>% 
+  tab_options(
+    column_labels.background.color = "white",
+    table.border.top.width = px(3),
+    table.border.top.color = "transparent",
+    table.border.bottom.color = "transparent",
+    table.border.bottom.width = px(3),
+    column_labels.border.top.width = px(3),
+    column_labels.border.top.color = "transparent",
+    column_labels.border.bottom.width = px(3),
+    column_labels.border.bottom.color = "black",
+    data_row.padding = px(3),
+    source_notes.font.size = 12,
+    table.font.size = 16,
+    heading.align = "left",
+    ...
+  ) 
+}
+
+gt_theme_espn <- function(data, ...){
+  data %>% 
+    opt_all_caps()  %>%
+    opt_table_font(
+      font = list(
+        google_font("Lato"),
+        default_fonts()
+      )
+    )  %>% 
+    opt_row_striping() %>% 
+    tab_options(
+      row.striping.background_color = "#fafafa",
+      table_body.hlines.color = "#f6f7f7",
+      source_notes.font.size = 12,
+      table.font.size = 16,
+      table.width = px(925),
+      heading.align = "left",
+      heading.title.font.size = 24,
+      table.border.top.color = "transparent",
+      table.border.top.width = px(3),
+      data_row.padding = px(7),
+      ...
+    ) 
+}
+
+th <- theme_fivethirtyeight() +
+  theme_classic() + 
+  theme(
+    plot.title = element_text(face = "bold", size = 24),
+    plot.subtitle = element_text(size = 18, face = "italic"),
+    plot.caption = element_markdown(size = 12, face = "italic"),
+    axis.text = element_text(size = 16),
+    axis.title.y = element_text(size = 16, angle = 0, vjust = .5), # vjust = location on (0, 1)
+    axis.title.x = element_text(size = 16), # vjust = location on (0, 1)
+    aspect.ratio = 1/asp_ratio,
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    strip.background = element_rect(color = "black", fill = "#C0C0C0", size = 3.5, linetype = "blank")
+    )
+```
+
+
+```{r}
+# checking for same names
+me <- readr::read_csv("C:/Users/Myles/OneDrive/Documents/GitHubThings/shot-quality/new-data/ncaa-logos.csv")
+
+team <- readr::read_csv("../data/ncaa/team.csv") %>%
+  janitor::clean_names() %>%
+  arrange(teams) %>%
+  group_by(teams) %>%
+  mutate(num = dplyr::row_number()) %>%
+  filter(num == 1) %>%
+  ungroup()
+
+hi <- dplyr::bind_cols(me, team) %>% select(c(team, conference, teams))
+
+hi
+table(hi$team == hi$logos)
+
+which(hi$team != hi$logos)
+
+#hi[c(169, 170, 176, 188), ]
+```
+
+
+
+```{r}
+d <- team %>%
+  filter(date == yesterday) %>%
+  mutate(points_difference = points_expected - points_scored,
+         new = abs(points_difference)) %>%
+  left_join(ncaa_logos) %>%
+  arrange(desc(points_difference)) %>%
+  slice(1:20)
+
+d
+```
+
+
+```{r}
+gt <- d %>%
+  select(logo, teams, points_expected, points_scored, points_difference) %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = .x,
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    teams = "",
+    points_expected = "Expected",
+    points_scored = "Scored",
+    points_difference = "Difference"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**ShotQuality discrepancies by Team**"),
+             subtitle = md("Games played on {format(yesterday, '%m-%d-%y')}")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(points_difference),
+    colors = scales::col_numeric(
+      domain = c(-15, 15),
+      alpha = .95,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(points_expected:points_difference)
+  ) %>%
+  tab_spanner(
+    label = "Team",
+    columns = c(logo:teams)
+  )
+
+gt
+
+gt::gtsave(data = gt,
+           filename = "playing-under-expectations.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+```{r}
+d <- team %>%
+  filter(date == yesterday) %>%
+  mutate(points_difference = points_expected - points_scored,
+         new = abs(points_difference)) %>%
+  left_join(ncaa_logos) %>%
+  arrange(points_difference) %>%
+  slice(1:10)
+
+d
+```
+
+
+```{r}
+gt <- d %>%
+  select(logo, teams, points_expected, points_scored, points_difference) %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  slice(1:20) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = .x,
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    teams = "",
+    points_expected = "Expected",
+    points_scored = "Scored",
+    points_difference = "Difference"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**ShotQuality discrepancies by Team**"),
+             subtitle = md(glue::glue("Games played on {format(yesterday, '%m-%d-%y')}"))) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(points_difference),
+    colors = scales::col_numeric(
+      domain = c(-24, 24),
+      alpha = .85,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(points_expected:points_difference)
+  ) %>%
+  tab_spanner(
+    label = "Team",
+    columns = c(logo:teams)
+  )
+
+gt
+
+gt::gtsave(data = gt,
+           filename = "team-diffs.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+
+```{r}
+d <- team %>%
+  left_join(ncaa_logos) %>%
+  filter(date == yesterday,
+         conference %in% "Big East",
+         teams %in% c("Villanova", "Butler")) %>%
+  mutate(points_difference = points_expected - points_scored,
+         new = abs(points_difference)) %>%
+  arrange(desc(new)) 
+
+d
+```
+
+```{r}
+g <- player %>%
+  filter(date == yesterday) %>%
+  mutate(points_difference = points_expected - points_scored,
+         new = abs(points_difference)) %>%
+  left_join(ncaa_logos) %>%
+  arrange(desc(points_difference)) %>%
+  slice(1:15)
+
+b <- player %>%
+  filter(date == yesterday) %>%
+  mutate(points_difference = points_expected - points_scored,
+         new = abs(points_difference)) %>%
+  left_join(ncaa_logos) %>%
+  arrange(points_difference) %>%
+  slice(1:15)
+
+g
+b
+```
+
+
+```{r}
+domain <- 15
+
+gt <- g %>%
+  select(logo, players, points_expected, points_scored, points_difference) %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = .x,
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    players = "",
+    points_expected = "Expected",
+    points_scored = "Scored",
+    points_difference = "Difference"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**ShotQuality discrepancies by Player**"),
+             subtitle = md("")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(points_difference),
+    colors = scales::col_numeric(
+      domain = c(-domain, domain),
+      alpha = .95,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(points_expected:points_difference)
+  ) %>%
+  tab_spanner(
+    label = "Team",
+    columns = c(logo:players)
+  )
+
+gt
+
+gt2 <- b %>%
+  select(logo, players, points_expected, points_scored, points_difference) %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = .x,
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    players = "",
+    points_expected = "Expected",
+    points_scored = "Scored",
+    points_difference = "Difference"
+  ) %>%
+  tab_source_note(
+    source_note = md("")
+  )  %>%
+  tab_header(title = md(glue::glue("Games played on {format(yesterday, '%m-%d-%y')}")),
+             subtitle = md("")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(points_difference),
+    colors = scales::col_numeric(
+      domain = c(-domain, domain),
+      alpha = .95,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(points_expected:points_difference)
+  ) %>%
+  tab_spanner(
+    label = "Team",
+    columns = c(logo:players)
+  ) %>%
+    opt_table_font(font = list(default_fonts())) %>%
+  tab_style(
+    style = cell_borders(
+      sides = "left",
+      color = "black",
+      weight = px(3)),
+    locations = list(cells_body(columns = 1),
+                     cells_column_labels(1))) %>%
+    tab_options(
+      column_labels.background.color = "white",
+      column_labels.font.weight = "bold",
+      table.border.top.width = px(3),
+      table.border.top.color = "transparent",
+      table.border.bottom.color = "transparent",
+      table.border.bottom.width = px(3),
+      column_labels.border.top.width = px(3),
+      column_labels.border.top.color = "transparent",
+      column_labels.border.bottom.width = px(3),
+      column_labels.border.bottom.color = "black",
+      data_row.padding = px(3),
+      source_notes.font.size = 12,
+      table.font.size = 16,
+      heading.align = "right"
+    )
+
+gt2
+
+gt::gtsave(data = gt,
+           filename = "left.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+
+gt::gtsave(data = gt2,
+           filename = "right.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+
+img1 <- magick::image_read("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/left.png")
+img2 <- magick::image_read("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/right.png")
+img3 <- magick::image_append(c(img1, img2))
+
+magick::image_write(image = img3,
+                    path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/players-side-to-side.png",
+                    format = 'png')
+
+knitr::include_graphics("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/players-side-to-side.png")
+```
+
+Game matchup:
+mutate(new = abs(points_difference)) %>%
+
+```{r}
+d <- matchups %>%
+  filter(date == yesterday) %>%
+  filter(teams %in% c("Northwestern", "Wisconsin")) %>%
+  left_join(ncaa_teams)
+
+d
+```
+
+
+```{r}
+lower_bound <- .05
+upper_bound <- .95
+
+gt <- d %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  select(logo, teams, sq_ppp, points_expected, points_scored, points_difference, game_mov) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = .x,
+          height = 30
+        ))}) %>%
+  cols_label(logo="", 
+             teams="",
+             sq_ppp="SQ PPP", 
+             points_expected="Expected", 
+             points_scored="Points",
+             points_difference = "Difference",
+             game_mov = "Margin of Victory") %>%
+  tab_source_note(source_note = md("<br>Figure: @Shot_Quality"))  %>%
+  tab_header(title = glue::glue("{d$teams[1]} vs. {d$teams[2]}"), # md("**Wisconsin at Northwestern**")
+             subtitle = glue::glue("{format(yesterday, '%m-%d-%y')}")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(sq_ppp),
+    colors = scales::col_numeric(domain = c(quantile(team$sq_ppp, c(lower_bound)), 
+                                            quantile(team$sq_ppp, c(upper_bound))),
+                                 alpha = .95, palette = c("#ff2700", "#f8fcf8", "#44ab43"))) %>%
+  data_color(
+    columns = c(points_expected),
+    colors = scales::col_numeric(domain = c(quantile(team$points_expected, c(lower_bound)), 
+                                            quantile(team$points_expected, c(upper_bound))),
+                                 alpha = .95, palette = c("#ff2700", "#f8fcf8", "#44ab43"))) %>%
+  data_color(
+    columns = c(points_scored),
+    colors = scales::col_numeric(domain = c(quantile(team$points_scored, c(lower_bound)), 
+                                            quantile(team$points_scored, c(upper_bound))),
+                                 alpha = .95, palette = c("#ff2700", "#f8fcf8", "#44ab43"))) %>%
+  data_color(
+    columns = c(points_difference),
+    colors = scales::col_numeric(domain = c(quantile(team$points_difference, c(lower_bound)), 
+                                            quantile(team$points_difference, c(upper_bound))),
+                                 alpha = .95, palette = c("#ff2700", "#f8fcf8", "#44ab43"))) %>%
+  data_color(
+    columns = c(game_mov),
+    colors = scales::col_numeric(domain = c(-20, 20),
+                                 alpha = .95, palette = c("#ff2700", "#f8fcf8", "#44ab43"))) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(sq_ppp:game_mov)
+  ) %>%
+  tab_spanner(
+    label = "Team",
+    columns = c(logo:teams)
+  )
+
+gt
+
+gt::gtsave(data = gt,
+           filename = "northwestern-vs-wisconsin.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+
+
+
+
+
+```{r}
+g <- team_accurate_game_stats %>%
+  filter(date == yesterday) %>%
+  mutate(new = abs(points_difference)) %>%
+  left_join(ncaa_teams) %>%
+  arrange(desc(points_difference)) %>%
+  slice(1:15)
+
+b <- team_accurate_game_stats %>%
+  filter(date == yesterday) %>%
+  mutate(new = abs(points_difference)) %>%
+  left_join(ncaa_teams) %>%
+  arrange(points_difference) %>%
+  slice(1:15)
+
+g
+b
+```
+
+
+```{r}
+domain <- 15
+
+gt <- g %>%
+  select(logo, players, points_expected, points_scored, points_difference) %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = .x,
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    players = "",
+    points_expected = "Expected",
+    points_scored = "Scored",
+    points_difference = "Difference"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**ShotQuality discrepancies by Player**"),
+             subtitle = md("")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(points_difference),
+    colors = scales::col_numeric(
+      domain = c(-domain, domain),
+      alpha = .95,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(points_expected:points_difference)
+  ) %>%
+  tab_spanner(
+    label = "Team",
+    columns = c(logo:players)
+  )
+
+gt
+
+gt2 <- b %>%
+  select(logo, players, points_expected, points_scored, points_difference) %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = .x,
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    players = "",
+    points_expected = "Expected",
+    points_scored = "Scored",
+    points_difference = "Difference"
+  ) %>%
+  tab_source_note(
+    source_note = md("")
+  )  %>%
+  tab_header(title = md(glue::glue("Games played on {format(yesterday, '%m-%d-%y')}")),
+             subtitle = md("")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(points_difference),
+    colors = scales::col_numeric(
+      domain = c(-domain, domain),
+      alpha = .95,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(points_expected:points_difference)
+  ) %>%
+  tab_spanner(
+    label = "Team",
+    columns = c(logo:players)
+  ) %>%
+    opt_table_font(font = list(default_fonts())) %>%
+  tab_style(
+    style = cell_borders(
+      sides = "left",
+      color = "black",
+      weight = px(3)),
+    locations = list(cells_body(columns = 1),
+                     cells_column_labels(1))) %>%
+    tab_options(
+      column_labels.background.color = "white",
+      column_labels.font.weight = "bold",
+      table.border.top.width = px(3),
+      table.border.top.color = "transparent",
+      table.border.bottom.color = "transparent",
+      table.border.bottom.width = px(3),
+      column_labels.border.top.width = px(3),
+      column_labels.border.top.color = "transparent",
+      column_labels.border.bottom.width = px(3),
+      column_labels.border.bottom.color = "black",
+      data_row.padding = px(3),
+      source_notes.font.size = 12,
+      table.font.size = 16,
+      heading.align = "right"
+    )
+
+gt2
+
+gt::gtsave(data = gt,
+           filename = "left.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+
+gt::gtsave(data = gt2,
+           filename = "right.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+
+img1 <- magick::image_read("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/left.png")
+img2 <- magick::image_read("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/right.png")
+img3 <- magick::image_append(c(img1, img2))
+
+magick::image_write(image = img3,
+                    path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/teams-side-to-side.png",
+                    format = 'png')
+
+knitr::include_graphics("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/teams-side-to-side.png")
+```
+
+
+Big 10 Conference Play
+```{r}
+selected_conference <- "Pac-12"
+
+left <- team_accurate_game_stats %>%
+  arrange(game_id, teams) %>%
+  slice(seq(1, 10000, by = 2)) %>%
+  left_join(ncaa_teams)
+
+right <- team_accurate_game_stats %>%
+  arrange(game_id, desc(teams)) %>%
+  slice(seq(1, 10000, by = 2)) %>%
+  left_join(ncaa_teams)
+
+left
+right
+
+join <- full_join(left, right, by = c("game_id"))
+
+join
+
+conf_games <- join %>%
+  filter(conference.x == selected_conference & conference.y == selected_conference) %>%
+  select(-game_id)
+
+lower <- conf_games %>%
+  select(teams.x:logo.x)
+
+upper <- conf_games %>%
+  select(teams.y:logo.y)
+
+new_names <- str_remove_all(colnames(upper), ".y")
+
+colnames(lower) <- new_names
+colnames(upper) <- new_names
+
+concat <- dplyr::bind_rows(lower, upper) %>%
+  arrange(desc(date))
+
+concat
+
+d <- concat %>%
+  group_by(teams) %>%
+  summarise(o1 = mean(points_expected),
+            o2 = mean(points_scored),
+            o3 = mean(points_difference),
+            o4 = mean(sq_ppp)) %>%
+  rename(points_expected = o1,
+         points_scored = o2,
+         points_difference = o3,
+         sq_ppp = o4) %>%
+  arrange(desc(sq_ppp))
+
+d
+```
+
+```{r}
+gt <- d %>%
+  left_join(ncaa_teams) %>%
+  select(logo, teams, points_expected, points_scored, points_difference, sq_ppp) %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = .x,
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    teams = "",
+    points_expected = "Expected",
+    points_scored = "Actual",
+    points_difference = "Difference",
+    sq_ppp = "SQ PPP"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**ShotQuality discrepancies by Team**"),
+             subtitle = md(glue::glue("{selected_conference} Conference Season"))) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(sq_ppp),
+    colors = scales::col_numeric(
+      domain = c(quantile(team_accurate_game_stats$sq_ppp, c(lower_bound)),
+                 quantile(team_accurate_game_stats$sq_ppp, c(upper_bound))),
+      alpha = .90,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(points_expected:sq_ppp)
+  ) %>%
+  tab_spanner(
+    label = "Team",
+    columns = c(logo:teams)
+  )
+
+gt
+
+gt::gtsave(data = gt,
+           filename = "conference-games-team-diffs.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+.
+
+```{r}
+d <- running_player %>%
+  arrange(desc(points)) %>%
+  left_join(ncaa_logos) %>%
+  mutate_at("players", Upper_Case_Names) %>%
+  #filter(!(conference %in% power_five_names)) %>%
+  filter(date >= "2022-01-31")
+d
+```
+
+
+```{r}
+domain1 <- c(quantile(running_player$good_pos_rate, .05, na.rm = T),
+             quantile(running_player$good_pos_rate, .95, na.rm = T))
+
+gt <- d %>%
+  mutate_at(c("sq_ppp", "sq_points"), function(x) {round(x, 2)}) %>%
+  select(logo, players, date, possessions, points, sq_points, sq_ppp, good_pos_rate) %>%
+  dplyr::slice(1:20) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = as.character(.x),
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    players = "",
+    date = "",
+    points = " Actual Points",
+    sq_points = "Expected Points",
+    possessions = "Possessions",
+    good_pos_rate = "Good Possession Rate",
+    sq_ppp = "SQ PPP"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**Top Scoring Performances: What were the Quality of Possessions?**"),
+             subtitle = md(glue::glue("February 2022"))) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(good_pos_rate),
+    colors = scales::col_numeric(
+      domain = domain1,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(possessions:good_pos_rate)) %>%
+  tab_spanner(
+    label = "Player",
+    columns = c(logo:date)) %>%
+  # Fixing column widths
+  cols_width(
+    players ~ gt::px(200),
+    possessions ~ gt::px(115),
+    logo ~ gt::px(40),
+    date ~ gt::px(120),
+    good_pos_rate ~ gt::px(130),
+    gt::everything() ~ gt::px(75)
+  ) %>%
+  # Fixing column names to be 'centered'
+  cols_align(
+  align = c("center"), columns = everything()) %>%
+  # Format percents for the rate stat
+  gt::fmt_percent(
+  columns = good_pos_rate,
+  rows = everything(),
+  decimals = 1) %>%
+  # Make each row the same height
+  tab_options(data_row.padding = gt::px(4))
+
+gt
+
+gt::gtsave(data = gt,
+           filename = "possessions-quality.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+SQ assists per game:
+
+```{r}
+d <- running_player %>%
+  group_by(players, logos) %>%
+  summarise(n = n(),
+            assists_total = sum(assists),
+            sq_assists_total = sum(sq_assists),
+            ) %>%
+  ungroup() %>%
+  mutate(pg_assists = assists_total / n,
+         pg_sq_assists = sq_assists_total / n) %>%
+  arrange(desc(pg_sq_assists)) %>%
+  filter(n > 3) %>%
+  left_join(ncaa_logos)
+
+d
+```
+
+
+```{r}
+gt <- d %>%
+  mutate_at(c("pg_sq_assists", "pg_assists"), function(x) {round(x, 2)}) %>%
+  select(logo, conference, players, n, pg_assists, pg_sq_assists) %>%
+  dplyr::slice(1:20) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = as.character(.x),
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    conference = "",
+    players = "",
+    n = "Games Played",
+    pg_assists = "Actual",
+    pg_sq_assists = "Expected"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**Top Distributors: Expected Assists per Game**"),
+             subtitle = md(glue::glue("2021-2022 Season"))) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(pg_assists),
+    colors = scales::col_numeric(
+      domain = c(0, 8.5),
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  data_color(
+    columns = c(pg_sq_assists),
+    colors = scales::col_numeric(
+      domain = c(0, 8.5),
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "Player",
+    columns = c(logo:players)) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(n:pg_sq_assists)) %>%
+  # Fixing column names to be 'centered'
+  cols_align(
+  align = c("center"), columns = everything()) %>%
+  # Make each row the same height
+  tab_options(data_row.padding = gt::px(3))
+
+gt
+
+gt::gtsave(data = gt,
+           filename = "mens-best-assisters.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+
+
+
+Player regression candidates: last month
+
+```{r}
+d <- player %>%
+  filter(date >= "2022-01-01" & date <= "2022-01-31") %>%
+  group_by(logos, players) %>%
+  summarise(n = n(),
+    o1 = sum(points_expected),
+    o2 = sum(points_scored),
+    o3 = sum(points_difference)) %>%
+  rename(points_expected = o1,
+         points_scored = o2,
+         points_difference = o3) %>%
+  ungroup() %>%
+  arrange(desc(points_difference)) %>%
+  left_join(ncaa_logos) %>%
+  filter(conference %in% power_five_names,
+         points_scored > 50)
+
+d
+```
+```{r}
+g <- d %>%
+  arrange(desc(points_difference)) %>%
+  slice(1:20)
+
+b <- d %>%
+  arrange(points_difference) %>%
+  slice(1:20)
+
+g
+b
+```
+
+
+```{r}
+domain <- 30
+
+gt <- g %>%
+  select(logo, players, n, points_expected, points_scored, points_difference) %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = .x,
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    players = "",
+    n = "n",
+    points_expected = "Expected",
+    points_scored = "Actual",
+    points_difference = "Difference"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**ShotQuality discrepancies by Player**"),
+             subtitle = md("")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(points_difference),
+    colors = scales::col_numeric(
+      domain = c(-domain, domain),
+      alpha = .95,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(n:points_difference)
+  ) %>%
+  tab_spanner(
+    label = "Player",
+    columns = c(logo:players)
+  )
+
+gt
+
+gt2 <- b %>%
+  select(logo, players, n, points_expected, points_scored, points_difference) %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = .x,
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    players = "",
+    n = "n",
+    points_expected = "Expected",
+    points_scored = "Actual",
+    points_difference = "Difference"
+  ) %>%
+  tab_source_note(
+    source_note = md("")
+  )  %>%
+  tab_header(title = md("**January 2022**"),
+             subtitle = md("")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(points_difference),
+    colors = scales::col_numeric(
+      domain = c(-domain, domain),
+      alpha = .95,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(n:points_difference)
+  ) %>%
+  tab_spanner(
+    label = "Player",
+    columns = c(logo:players)
+  ) %>%
+    opt_table_font(font = list(default_fonts())) %>%
+  tab_style(
+    style = cell_borders(
+      sides = "left",
+      color = "black",
+      weight = px(3)),
+    locations = list(cells_body(columns = 1),
+                     cells_column_labels(1))) %>%
+    tab_options(
+      column_labels.background.color = "white",
+      column_labels.font.weight = "bold",
+      table.border.top.width = px(3),
+      table.border.top.color = "transparent",
+      table.border.bottom.color = "transparent",
+      table.border.bottom.width = px(3),
+      column_labels.border.top.width = px(3),
+      column_labels.border.top.color = "transparent",
+      column_labels.border.bottom.width = px(3),
+      column_labels.border.bottom.color = "black",
+      data_row.padding = px(3),
+      source_notes.font.size = 12,
+      table.font.size = 16,
+      heading.align = "right"
+    )
+
+gt2
+
+gt::gtsave(data = gt,
+           filename = "left.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+
+gt::gtsave(data = gt2,
+           filename = "right.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+
+img1 <- magick::image_read("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/left.png")
+img2 <- magick::image_read("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/right.png")
+img3 <- magick::image_append(c(img1, img2))
+
+magick::image_write(image = img3,
+                    path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/players-side-to-side.png",
+                    format = 'png')
+
+knitr::include_graphics("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/players-side-to-side.png")
+```
+
+```{r}
+d <- team %>%
+  inner_join(ncaa_teams) %>%
+  filter(conference %in% power_five_names) %>%
+  group_by(teams) %>%
+  summarise(games = n(),
+            sq_ppp = mean(sq_ppp),
+            pace = mean(possessions),
+            exp = mean(points_expected),
+            obs = mean(points_scored),
+            exp_ppp = exp / pace,
+            obs_ppp = obs / pace) %>%
+  left_join(ncaa_teams) %>%
+  arrange(desc(exp_ppp))
+
+d
+```
+
+
+```{r}
+p <- d %>%
+  ggplot() + 
+  ggimage::geom_image(aes(
+    x = exp_ppp,
+    y = obs_ppp,
+    image = logo
+    ),
+    size = 0.03, by = "width", asp = asp_ratio) +
+  labs(x = "Expected",
+       y = "Observed",
+       title = "Expected Points per Possession vs. Actual",
+       subtitle = glue::glue("Power 5 Schools, as of {format(yesterday, '%m-%d-%y')}"),
+       caption = "@Shot_Quality") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) + 
+  coord_cartesian(xlim = c(0.90, 1.3), ylim = c(0.9, 1.3)) + th
+
+p
+
+ggplot2::ggsave(
+  filename = "../viz/power-5-ppp.png",
+  plot = p,
+  height = 8,
+  width = 8*asp_ratio,
+  dpi = "retina"
+)
+```
+
+
+```{r}
+p2 <- df %>%
+  mutate(diff = exp_ppp - obs_ppp) %>%
+  arrange(desc(diff)) %>%
+  mutate(teams = reorder(teams, diff),
+         primary = ifelse(diff >= 0, "darkgreen", "red4"),
+         spot = 0) %>%
+  ggplot() + 
+  scale_color_identity(aesthetics =  c("fill", "color")) +
+  coord_cartesian(xlim = c(-.1, .1)) +
+  geom_errorbarh(aes(y = teams, xmin = spot, xmax = spot+diff, color = primary), height = 0.15) +
+  geom_point(aes(x = diff, y = teams, color = primary), size = 2.33) + 
+  ggimage::geom_image(aes(x = spot, y = teams, image = paths), size = 0.0145, by = "width", asp = asp_ratio) + 
+  labs(x = "",
+       y = "",
+       title = "Points per Possession Scored vs Expected",
+       subtitle = "Ranked by PPP Difference (PPP Expected - PPP Observed)",
+       caption = "Figure: @Shot_Quality"
+       ) + th + 
+  theme(axis.text = element_text(size = 6))
+p2
+  
+ggplot2::ggsave(
+  filename = "../viz/power-5-ppp2.png",
+  plot = p2,
+  height = 14,
+  width = 14*asp_ratio,
+  dpi = "retina"
+)
+```
+
+```{r}
+d1 <- player %>%
+  mutate(date = lubridate::dmy(date)) %>%
+  filter(date >= lubridate::dmy("10-10-2021")) %>%
+  left_join(ncaa_info, by = c("logos" = "team")) %>%
+  filter(conference %in% p5c) %>%
+  arrange(desc(points_expected)) %>%
+  mutate(tt = ifelse(points_expected > 31.2, 1, 0),
+         paths = ifelse(points_expected > 31.2, paths, NA)) %>%
+  filter(points_expected > 0 & points_scored > 0) %>%
+  select(logos:points_difference, conference:tt)
+
+d1
+```
+
+
+```{r}
+p3 <- d1 %>%
+  mutate(str = paste(players, date, sep = ": "),
+         str = ifelse(points_expected > 31.2, str, NA)) %>%
+  ggplot(aes(x = points_expected, y = points_scored, label = str, image = paths)) + 
+  geom_point(alpha = .2) +
+  ggimage::geom_image(size = 0.033, by = "width", asp = 16/9) + 
+  ggrepel::geom_text_repel(size = 2) +
+  labs(x = "Expected",
+       y = "Scored",
+       title = "Points Scored vs Expected by Player by Game",
+       subtitle = "2021-2022 Season",
+       caption = "Figure: @Shot_Quality"
+       ) + th
+
+p3
+  
+ggplot2::ggsave(
+  filename = "../viz/power-5-ppp3.png",
+  plot = p3,
+  height = 6,
+  width = 6*asp_ratio,
+  dpi = "retina"
+)
+```
+
+```{r}
+d <- d1 %>%
+  select(paths, players, date, points_expected, points_scored)
+d
+```
+
+
+```{r}
+d %>%
+  mutate(paths = ifelse(is.na(paths), "C:/Users/Myles/OneDrive/Documents/GitHubThings/shot-quality/Logos/NCAA_logo.png", paths)) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(paths)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = .x,
+          height = 30
+        ))})
+```
+
+
+```{r}
+#d %>% 
+#  gt() %>% 
+#  text_transform(
+#    locations = cells_body(columns = "paths"), 
+#    fn = function(x) purrr::map_chr(x, ~{local_image(filename =  as.character(.x), height = 120)}))
+```
+```{r}
+ncaa_info %>%
+  slice(1:5) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(vars(paths)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = as.character(.x),
+          height = 30
+        ))})
+  
+```
+
+Fixing the A&M problem:
+
+```{r}
+# This is the right one.
+old <- "C:/Users/Myles/OneDrive/Documents/GitHubThings/shot-quality/new-data/ncaa-logos-before-am-fix.csv" %>%
+  readr::read_csv() 
+
+old
+
+new <- old %>%
+  select(team, conference) %>%
+  mutate(logo = str_remove_all(string = team, pattern = "&"),
+         logo = paste0("C:/Users/Myles/OneDrive/Documents/GitHubThings/shot-quality/Logos/copy/", logo, ".png")) %>%
+  mutate(logo = ifelse(team == "William & Mary",
+                       "C:/Users/Myles/OneDrive/Documents/GitHubThings/shot-quality/Logos/copy/WilliamMary.png",
+                       logo))
+
+new
+
+write.csv(new, file = "C:/Users/Myles/OneDrive/Documents/GitHubThings/shot-quality/new-data/ncaa-logos.csv")
+
+new %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = as.character(.x),
+          height = 30))})
+```
+
+```{r}
+team %>%
+  group_by(teams) %>%
+  dplyr::count() %>%
+  select(-n) %>%
+  ungroup() %>%
+  mutate(logo = str_remove_all(string = teams, pattern = "&"),
+         logo = paste0("C:/Users/Myles/OneDrive/Documents/GitHubThings/shot-quality/Logos/copy/", logo, ".png")) 
+```
+
+```{r, eval=FALSE}
+# save to my local
+write.csv(ncaa_info2,
+          file = "C:/Users/Myles/OneDrive/Documents/GitHubThings/shot-quality/new-data/ncaa-logos.csv")
+```
+Wisconsin vs. Iowa plot.
+
+```{r}
+# Load libraries
+library(tidyverse)
+library(gt)
+library(tidymodels)
+library(ggthemes)
+library(ggtext)
+library(stringi)
+library(gt)
+library(rmarkdown)
+library(rlang)
+
+# Files with nba team logos, colors, etc
+ncaa_info <- readr::read_csv("C:/Users/Myles/OneDrive/Documents/GitHubThings/shot-quality/new-data/ncaa-logos.csv")
+team <- readr::read_csv("../data/ncaa/team.csv") %>% janitor::clean_names()
+player <- readr::read_csv("../data/ncaa/player.csv") %>% janitor::clean_names()
+ncaa_info ; team ; player
+
+```
+
+```{r}
+df <- player %>%
+  arrange(desc(date)) %>%
+  filter(logos %in% c("Wisconsin", "Iowa")) %>%
+  filter(date == "2022-01-06") %>%
+  mutate(new = abs(points_difference)) %>%
+  arrange(desc(new)) %>%
+  left_join(ncaa_info, by = c("logos" = "team")) %>%
+  filter(points_scored >= 1.5) %>%
+  filter(points_expected >= 1.5)
+
+df
+```
+
+```{r}
+gt1 <- df %>%
+  select(logo, players, points_expected:points_difference) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(vars(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = as.character(.x),
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    players = "",
+    points_expected = "Expected",
+    points_scored = "Scored",
+    points_difference = "Difference"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**ShotQuality discrepancies**"),
+             subtitle = md("Iowa at Wisconsin, 1/6/2022")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(points_difference),
+    colors = scales::col_numeric(
+      domain = c(-12, 12),
+      alpha = .85,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(points_expected:points_difference)
+  ) %>%
+  tab_spanner(
+    label = "Player",
+    columns = c(logo:players)
+  ) ; gt1
+
+gt::gtsave(data = gt1,
+           filename = "wisconsin-iowa.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+
+2 Sided GT table.
+
+```{r}
+yesterday <- lubridate::today() - 1
+
+player %>%
+  filter(date == yesterday)
+
+team %>%
+  filter(date == yesterday)
+```
+
+```{r}
+team
+melted_sums <- team %>%
+  select(-c(x1:x1_1, game_id, date_2, opponent)) %>%
+  filter(date >= "2022-01-12" & date <= "2022-02-12") %>%
+  mutate(three_pt_ev = x3pt_fg_percent_expected*x3pt_attempts,
+         three_pt_v = x3pt_fg_percent*x3pt_attempts) %>%
+  reshape2::melt(id.vars = c("teams", "date")) %>%
+  group_by(teams, variable) %>%
+  summarise(means = mean(value),
+            .groups = "drop") %>%
+  reshape2::dcast(formula = teams ~ variable) %>%
+  arrange(desc(point_differential_team))
+
+melted_sums
+```
+  
+3PT shooting luck. Best and worst
+
+```{r}
+lower_bound <- .05
+upper_bound <- .95
+
+quantile(melted_sums$three_pt_ev, lower_bound)
+quantile(melted_sums$three_pt_ev, .50)
+quantile(melted_sums$three_pt_ev, upper_bound)
+```
+
+
+```{r}
+d <- melted_sums %>%
+  arrange(desc(three_pt_ev)) %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  left_join(ncaa_teams) %>%
+  #filter(conference %in% power_five_names) %>%
+  select(logo, teams, three_pt_ev, three_pt_v, sq_ppp)
+
+d
+```
+
+```{r}
+gt1 <- d %>%
+  slice(1:20) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = as.character(.x),
+          height = 30
+        ))}) %>%
+  cols_label(logo="", 
+            teams="",
+            sq_ppp="SQ PPP", 
+            three_pt_ev = "Expected 3PM",
+            three_pt_v = "3PM",
+             ) %>%
+  tab_source_note(source_note = md("<br>Figure: @Shot_Quality"))  %>%
+  tab_header(title = md("**Generating 3PT Looks, NCAA Division 1**"),
+             subtitle = md("")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(sq_ppp),
+    colors = scales::col_numeric(domain = c(0.74, 1.35),
+                                 alpha = .95, palette = c("#ff2700", "#f8fcf8", "#44ab43"))) %>%
+  data_color(
+    columns = c(three_pt_ev),
+    colors = scales::col_numeric(domain = c(4.5, 13.5),
+                                 alpha = .95, palette = c("#ff2700", "#f8fcf8", "#44ab43"))) %>%
+  data_color(
+    columns = c(three_pt_v),
+    colors = scales::col_numeric(domain = c(4.5, 13.5),
+                                 alpha = .95, palette = c("#ff2700", "#f8fcf8", "#44ab43"))) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(three_pt_ev:sq_ppp)
+  ) %>%
+  tab_spanner(
+    label = "Team",
+    columns = c(logo:teams)
+  )
+  
+gt1
+
+gt::gtsave(data = gt1,
+           filename = "left-side.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+```{r}
+gt2 <- d %>%
+  arrange(three_pt_ev) %>%
+  slice(1:20) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = as.character(.x),
+          height = 30
+        ))}) %>%
+  cols_label(logo="", 
+            teams="",
+            sq_ppp="SQ PPP", 
+            three_pt_ev = "Expected 3PM",
+            three_pt_v = "3PM",
+             ) %>%
+  tab_header(title = md("Per game, from 1/12/2022 to 2/12/2022"),
+             subtitle = md("")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(sq_ppp),
+    colors = scales::col_numeric(domain = c(0.74, 1.35),
+                                 alpha = .95, palette = c("#ff2700", "#f8fcf8", "#44ab43"))) %>%
+  data_color(
+    columns = c(three_pt_ev),
+    colors = scales::col_numeric(domain = c(3, 10.5),
+                                 alpha = .95, palette = c("#ff2700", "#f8fcf8", "#44ab43"))) %>%
+  data_color(
+    columns = c(three_pt_v),
+    colors = scales::col_numeric(domain = c(3, 10.5),
+                                 alpha = .95, palette = c("#ff2700", "#f8fcf8", "#44ab43"))) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(three_pt_ev:sq_ppp)
+  ) %>%
+  tab_spanner(
+    label = "Team",
+    columns = c(logo:teams)
+  ) %>%
+    tab_options(
+      column_labels.background.color = "white",
+      column_labels.font.weight = "bold",
+      table.border.top.width = px(3),
+      table.border.top.color = "transparent",
+      table.border.bottom.color = "transparent",
+      table.border.bottom.width = px(3),
+      column_labels.border.top.width = px(3),
+      column_labels.border.top.color = "transparent",
+      column_labels.border.bottom.width = px(3),
+      column_labels.border.bottom.color = "black",
+      data_row.padding = px(3),
+      source_notes.font.size = 12,
+      table.font.size = 16,
+      heading.align = "right"
+    ) %>%
+    opt_table_font(font = list(default_fonts())) %>%
+  tab_style(style = cell_borders(sides = "left", color = "black", weight = px(3)),
+    locations = list(cells_body(columns = 1), cells_column_labels(1))) 
+
+gt2
+
+# save
+gt::gtsave(data = gt2,
+           filename = "right-side.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+```{r}
+# put together
+img1 <- magick::image_read("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/left-side.png")
+img2 <- magick::image_read("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/right-side.png")
+img3 <- magick::image_append(c(img1, img2))
+
+magick::image_write(image = img3,
+                    path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/gt-table.png",
+                    format = 'png')
+
+img3
+
+knitr::include_graphics("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/gt-table.png")
+```
+
+Predictive power graphs:
+
+```{r}
+matchups %>%
+  select(-c(teams, opponent, game_id, date)) %>%
+  cor() %>%
+  as.data.frame() %>%
+  arrange(desc(game_mov)) %>%
+  select(game_mov)
+
+matchups %>%
+  select(-c(teams, opponent, game_id, date)) %>%
+  cor() %>%
+  as.data.frame() %>%
+  arrange(desc(game_mov_expected)) %>%
+  select(game_mov_expected)
+
+matchups %>%
+  select(-c(teams, opponent, game_id, date)) %>%
+  cor() %>%
+  as.data.frame() %>%
+  arrange(desc(win)) %>%
+  select(win)
+
+matchups %>%
+  select(-c(teams, opponent, game_id, date)) %>%
+  cor() %>%
+  as.data.frame() %>%
+  arrange(desc(win_expectation)) %>%
+  select(win_expectation)
+
+
+
+
+```
+
+```{r}
+d <- matchups %>%
+  filter(teams != 'Division 2/3 team') %>%
+  group_by(teams) %>%
+  summarise(n = n(),
+            possessions_per_game = mean(possessions),
+            points_expected_season = sum(points_expected),
+            points_scored_season = sum(points_scored),
+            points_allowed_season = sum(points_allowed),
+            points_allowed_expected_season = sum(points_allowed_expected),
+            point_differential_season = sum(game_mov),
+            point_differential_season_expected = sum(game_mov_expected),
+            wins_season = sum(win),
+            wins_expected_season = sum(win_expectation),
+            wins_percentage = mean(win),
+            wins_percentage_expected = mean(win_expectation)
+            ) %>%
+  arrange(desc(point_differential_season_expected))
+
+d
+```
+
+```{r}
+# Removing outliers, the aggregate of D2/D3 Teams
+d %>%
+  filter(point_differential_season_expected < -200)
+```
+
+```{r}
+d %>%
+  select(-c(teams, n, possessions_per_game)) %>%
+  cor() %>%
+  as.data.frame() %>%
+  arrange(desc(wins_percentage)) %>%
+  select(wins_percentage)
+
+d %>%
+  select(-c(teams, n, possessions_per_game)) %>%
+  cor() %>%
+  as.data.frame() %>%
+  arrange(desc(point_differential_season)) %>%
+  select(point_differential_season)
+
+```
+
+Scatterplot with win% and SQ point_diff this season:
+
+```{r}
+d %>%
+  select(teams, point_differential_season_expected, wins_percentage) %>%
+  left_join(ncaa_teams) %>%
+  ggplot(aes(x = point_differential_season_expected,
+             y = wins_percentage)) +
+  #geom_point() +
+  ggimage::geom_image(aes(image = logo),
+                      size = 0.03, by = "width", asp = asp_ratio) +
+  labs(x = "Expected Aggregate Point Differential",
+       y = "Win %",
+       title = "Team Overall ShotQuality is highly correlated with Team Winning %",
+       subtitle = glue::glue("2021-2022 Season"),
+       caption = "@Shot_Quality") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10),
+                     labels = function(x) {scales::percent(x, accuracy = 1)}) + th
+
+ggplot2::ggsave(
+  filename = "../viz/ncaa-sq1.png",
+  height = 8,
+  width = 8*asp_ratio,
+  dpi = "retina"
+)
+```
+
+Getting R^2 for each metrics
+
+Single game performances tend to be noisy, especially when looking at individual statistics. Using the mean values for each box score statistic for each individual game, we will bucket each team and box score statistic into `3` game rolling windows and find the correlation across teams during this season. 
+
+```{r}
+# Size of bins
+num <- 3
+
+# grab the columns I will be working with (for the most part)
+df <- matchups
+
+df
+
+binned_means <- df %>% 
+  reshape2::melt(id.vars = c("teams", "game_id")) %>%
+  filter(!(variable %in% c("date", "opponent"))) %>%
+  dplyr::group_by(teams, variable) %>% 
+  dplyr::mutate(game_number = dplyr::row_number()) %>% 
+  dplyr::ungroup() %>%
+  dplyr::mutate(game_cut = cut(game_number, breaks = seq(0, 50, by = num))) %>%
+  dplyr::select(-c(game_number, game_id)) %>% 
+  tidyr::complete(nesting(teams, game_cut, variable), fill = list(n = 0)) %>% 
+  dplyr::arrange(teams, game_cut, variable) %>%   
+  dplyr::group_by(teams, game_cut, variable) %>% 
+  dplyr::mutate_at("value", as.numeric) %>%
+  dplyr::summarise(bin_mean = mean(value),       
+                   .groups = "drop") %>%
+  dplyr::ungroup()
+
+binned_means
+
+lagged <- binned_means %>%
+  tidyr::complete(nesting(teams, game_cut, variable), fill = list(n = 0)) %>% 
+  dplyr::arrange(teams, game_cut, variable) %>%
+  dplyr::group_by(teams, variable) %>% 
+  dplyr::mutate(prev_bin_mean = dplyr::lag(bin_mean, default = NA)) %>% 
+  dplyr::ungroup() %>%
+  dplyr::mutate(weight = sqrt(bin_mean^2 + prev_bin_mean^2)) 
+
+lagged
+
+
+lagged2 <- lagged %>%
+  dplyr::filter(!is.na(weight))
+
+lagged2
+
+
+# WITH weighted regression
+results <- lagged2 %>%
+  tidyr::nest(data = c(teams, game_cut, bin_mean, prev_bin_mean, weight)) %>% # nest so we can map over 24 vars
+  # using previous bin to predict the future bin
+  dplyr::mutate(fit = map(data, ~ lm(bin_mean ~ prev_bin_mean, weights = weight, data = .)),
+                # this 'glanced' function returns a one-row data frame of model information
+                results = map(fit, broom::glance)) %>%
+  # this 'unnest' takes the nested results and turns them into columns
+  tidyr::unnest(cols = c(results)) 
+  
+# WITHOUT weighted regression
+results_unweighted <- lagged2 %>%
+  tidyr::nest(data = c(teams, game_cut, bin_mean, prev_bin_mean, weight)) %>% 
+  dplyr::mutate(fit = map(data, ~ lm(bin_mean ~ prev_bin_mean, data = .)),
+                results = map(fit, broom::glance)) %>%
+  tidyr::unnest(cols = c(results)) 
+
+# looking at weighted regression of vars I am interested in
+results %>%
+  select(variable, r.squared) %>%
+  arrange(desc(r.squared))
+```
+
+```{r}
+results %>%
+  select(variable, r.squared) %>%
+  arrange(desc(r.squared)) %>%
+  filter(variable %in% c("game_mov_expected", "game_mov")) %>%
+  mutate(variable = reorder(variable, r.squared)) %>%
+  mutate(variable = case_when(
+    variable == "game_mov_expected" ~ "ShotQuality",
+    variable == "game_mov" ~ "Box Score",
+    TRUE ~ as.character(variable)
+  )) %>%
+  ggplot(aes(x = variable, 
+             y = r.squared,
+             fill = variable,
+             width = .75)) +
+  geom_col(show.legend = F, width = 0.5) +
+  labs(x = expression(bold("3 Game Bucket Correlation:"~R^2)),
+       y = NULL,
+       #fill = NULL,
+       title = "Stability of ShotQuality Point Differential",
+       subtitle = "Correlation of team point differential across 3 game windows",
+       caption = "Chart: @Shot_Quality | 2021-2022 Season") + 
+  coord_cartesian(ylim = c(0, 0.40)) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10),
+                     labels = function(x) {scales::percent(x, accuracy = 1)}) + th +
+  scale_fill_manual(values = c("blue4", "orange1"))
+
+ggplot2::ggsave(
+  filename = "../viz/ncaa-sq2.png",
+  height = 8,
+  width = 8*asp_ratio,
+  dpi = "retina"
+)  
+```
+
+aa:
+
+```{r}
+d %>%
+  mutate(points_expected_possession = points_expected_season / n / possessions_per_game) %>%
+  select(teams, points_expected_possession, wins_percentage) %>%
+  left_join(ncaa_teams) %>%
+  ggplot(aes(x = points_expected_possession,
+             y = wins_percentage)) +
+  ggimage::geom_image(aes(image = logo),
+                      size = 0.03, by = "width", asp = asp_ratio) +
+  labs(x = "Expected Points per Possession",
+       y = "Win %",
+       title = "Offensive ShotQuality is also very highly correlated with Team Winning %",
+       subtitle = glue::glue("2021-2022 Season"),
+       caption = "@Shot_Quality") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10),
+                     labels = function(x) {scales::percent(x, accuracy = 1)}) + th
+
+ggplot2::ggsave(
+  filename = "../viz/ncaa-sq3.png",
+  height = 8,
+  width = 8*asp_ratio,
+  dpi = "retina"
+)
+```
+
+Power 5 teams...:
+
+After changing paths:
+```{r, eval=FALSE}
+# DO NOT EVAL
+new <- ncaa_logos %>%
+  mutate(logo = str_replace_all(logo, pattern = "shot-quality", replacement = "sq"))
+
+new
+
+write.csv(x = new, "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/a/ncaa-logos.csv")
+
+new2 <- ncaa_teams %>%
+  mutate(logo = str_replace_all(logo, pattern = "shot-quality", replacement = "sq"))
+
+new2
+
+write.csv(x = new2, "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/a/ncaa-teams.csv")
+```
+
+```{r}
+team_accurate_game_stats %>%
+  group_by(teams) %>%
+  summarise(n = n(),
+            stat = mean(sq_ppp)) %>%
+  arrange(desc(stat)) %>%
+  left_join(ncaa_teams) %>%
+  filter(conference %in% power_five_names) %>%
+  mutate(teams = reorder(teams, -stat)) %>%
+  ggplot(aes(x = teams, y = stat, image = logo)) + 
+  geom_col() + 
+  ggimage::geom_image(size = 0.025) + th
+  
+```
+
+Auburn:
+
+Creighton:
+
+```{r}
+team_accurate_game_stats
+team_accurate_game_stats %>%
+  filter(teams == "Marquette") %>%
+  left_join(ncaa_teams) %>%
+  ggplot(aes(x = date, y = points_difference)) + geom_line() + th + 
+  labs(title = "Fluctuation of Scoring Output vs. Expectation",
+       subtitle = "Marquette, 2021-2022 season",
+       x = "Date", y = "Difference\n(Expected - Actual)", caption = "@Shot_Quality") + 
+  ggimage::geom_image(aes(image=logo), size = 0.055, by="height") +
+  scale_size_identity() + 
+  coord_cartesian(ylim = c(-25, 25)) + 
+  geom_hline(yintercept = 0)
+
+ggplot2::ggsave(
+  filename = "../viz/MU.png",
+  height = 8,
+  width = 8*asp_ratio,
+  dpi = "retina"
+)
+```
+
+Big 10 Conference Play
+```{r}
+selected_conference <- "Big 12"
+
+left <- team_accurate_game_stats %>%
+  arrange(game_id, teams) %>%
+  slice(seq(1, 10000, by = 2)) %>%
+  left_join(ncaa_teams)
+
+right <- team_accurate_game_stats %>%
+  arrange(game_id, desc(teams)) %>%
+  slice(seq(1, 10000, by = 2)) %>%
+  left_join(ncaa_teams)
+
+left
+right
+
+join <- full_join(left, right, by = c("game_id")) %>%
+  mutate(sq_ppp_allowed.x = sq_ppp.y,
+         sq_ppp_allowed.y = sq_ppp.x,
+         opponent.x = teams.y,
+         opponent.y = teams.x,
+         points_allowed.x = points_scored.y,
+         points_allowed.y = points_scored.x
+         )
+
+join
+
+conf_games <- join %>%
+  filter(conference.x == selected_conference & conference.y == selected_conference) %>%
+  select(-game_id)
+
+lower <- conf_games %>%
+  select(teams.x:logo.x, opponent.x, sq_ppp_allowed.x, points_allowed.x)
+
+upper <- conf_games %>%
+  select(teams.y:logo.y, opponent.y, sq_ppp_allowed.y, points_allowed.y)
+
+new_names <- str_remove_all(colnames(upper), ".y")
+
+colnames(lower) <- new_names
+colnames(upper) <- new_names
+
+concat <- dplyr::bind_rows(lower, upper) %>%
+  arrange(desc(date))
+
+concat
+
+d <- concat %>%
+  arrange(sq_ppp_allowed) %>%
+  slice(1:10) %>%
+  select(logo, teams, opponent, date, points_allowed, sq_ppp_allowed)
+
+d
+```
+
+```{r}
+gt <- d %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = .x,
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    teams = "Team",
+    opponent = "Opponent",
+    date = "Date",
+    points_allowed = "Points Allowed",
+    sq_ppp_allowed = "SQ PPP Allowed"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**Top Defensive Performances**"),
+             subtitle = md(glue::glue("{selected_conference} Conference Season"))) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(sq_ppp_allowed),
+    colors = scales::col_numeric(
+      domain = c(.70, 1.2),
+      alpha = .90,
+      palette = c("#44ab43", "#f8fcf8", "#ff2700")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(points_allowed:sq_ppp_allowed)
+  ) %>%
+  tab_spanner(
+    label = "Matchup",
+    columns = c(logo:date)
+  )
+
+gt
+
+gt::gtsave(data = gt,
+           filename = "a.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+.
+Top 20 Teams in NET ADJ SQ
+
+```{r}
+# Downloaded from website
+data <- "C:/Users/Myles/Downloads/shot_quality.csv" %>%
+  readr::read_csv() %>%
+  janitor::clean_names()
+
+d <- data %>%
+  arrange(desc(adjusted_shot_quality)) %>%
+  left_join(ncaa_logos, by = c("team_name" = "logos"))
+
+d
+```
+
+
+```{r}
+gt <- d %>%
+  select(logo, team_name, conference.y, offensive_shot_quality, defensive_shot_quality, adjusted_shot_quality) %>%
+  slice(1:15) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = .x,
+          height = 30))}) %>%
+  cols_label(
+    logo = "",
+    team_name = "Team",
+    conference.y = "Conference",
+    offensive_shot_quality = "Offensive",
+    defensive_shot_quality = "Defense",
+    adjusted_shot_quality = "Net Adjusted"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**Top 15 Teams in Net Adjusted ShotQuality**"),
+             subtitle = md(glue::glue("2021-2022 Season"))) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(offensive_shot_quality),
+    colors = scales::col_numeric(
+      domain = c(0.8, 1.4),
+      alpha = .90,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  data_color(
+    columns = c(defensive_shot_quality),
+    colors = scales::col_numeric(
+      domain = c(1.4, 0.8),
+      alpha = .90,
+      palette = c("#44ab43", "#f8fcf8", "#ff2700")  
+    )) %>%
+  data_color(
+    columns = c(adjusted_shot_quality),
+    colors = scales::col_numeric(
+      domain = c(-0.4, 0.4),
+      alpha = .90,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality",
+    columns = c(offensive_shot_quality:adjusted_shot_quality)
+  ) %>%
+  tab_spanner(
+    label = "Matchup",
+    columns = c(logo:conference.y)
+  )
+gt
+gt::gtsave(data = gt,
+           filename = "1.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+Does SQ change home/away?
+```{r}
+team_accurate_game_stats #%>%
+  group_by()
+  summarise(t = mean(points_difference))
+```
+
+Top SQ team in each conference:
+```{r}
+d <- "C:/Users/Myles/Downloads/shot_quality.csv" %>%
+  readr::read_csv() %>%
+  janitor::clean_names() %>%
+  rename(teams = team_name) %>%
+  filter(teams != "Division 2/3 team") %>%
+  select(teams, adjusted_shot_quality, offensive_shot_quality, defensive_shot_quality) %>%
+  group_by(teams) %>%
+  arrange(desc(adjusted_shot_quality)) %>%
+  left_join(ncaa_teams) %>%
+  group_by(conference) %>%
+  mutate(counter = dplyr::row_number()) %>%
+  ungroup() %>%
+  filter(counter == 1) %>%
+  left_join(ncaa_teams)
+
+d
+
+top_bucket <- c(power_five_names, "Big East")
+other_bucket <- c()
+for (i in 1:length(d$conference)) {
+  if ((!(d$conference[i] %in% top_bucket))) {
+    other_bucket <- append(other_bucket, values = c(d$conference[i]))
+  }
+}
+other_bucket
+top_bucket
+middle_bucket <- other_bucket[c(1:6,9,11,12,18,22)]
+low_bucket <- other_bucket[c(7,8,10,13:16,17,19:21, 23:26)]
+
+
+```
+```{r}
+gt <- d %>%
+  select(logo, teams, conference, offensive_shot_quality, defensive_shot_quality, adjusted_shot_quality) %>%
+  filter(conference %in% low_bucket) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = .x,
+          height = 30))}) %>%
+  cols_label(
+    logo = "",
+    teams = "Team",
+    conference = "Conference",
+    offensive_shot_quality = "Offensive",
+    defensive_shot_quality = "Defense",
+    adjusted_shot_quality = "Net Adjusted"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**Top Schools by Conference**"),
+             subtitle = md(glue::glue("2021-2022 Season"))) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(offensive_shot_quality),
+    colors = scales::col_numeric(
+      domain = c(0.8, 1.4),
+      alpha = .90,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  data_color(
+    columns = c(defensive_shot_quality),
+    colors = scales::col_numeric(
+      domain = c(1.4, 0.8),
+      alpha = .90,
+      palette = c("#44ab43", "#f8fcf8", "#ff2700")  
+    )) %>%
+  data_color(
+    columns = c(adjusted_shot_quality),
+    colors = scales::col_numeric(
+      domain = c(-0.4, 0.4),
+      alpha = .90,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality",
+    columns = c(offensive_shot_quality:adjusted_shot_quality)
+  ) %>%
+  tab_spanner(
+    label = "Matchup",
+    columns = c(logo:conference)
+  )
+gt
+gt::gtsave(data = gt,
+           filename = "3.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+Rim and 3Rate
+
+Offensive SQ > Defensive SQ
+```{r}
+d <- "C:/Users/Myles/Downloads/shot_quality.csv" %>%
+  readr::read_csv() %>% 
+  janitor::clean_names() %>%
+  rename(teams = team_name) %>%
+  select(-c(conference)) %>%
+  left_join(ncaa_teams) 
+
+d
+```
+
+
+
+```{r}
+r2 <- cor(d$offensive_shot_quality, d$actual_win_percentage)*cor(d$offensive_shot_quality, d$actual_win_percentage)
+r2
+
+d %>%
+  ggplot(aes(x = offensive_shot_quality,
+             y = actual_win_percentage)) +
+  ggimage::geom_image(aes(image = logo),
+                      size = 0.03, by = "width", asp = asp_ratio) +
+  labs(x = "Offensive ShotQuality",
+       y = "Win %",
+       title = "Offensive ShotQuality is more predictive to Win % than Defensive ShotQuality",
+       subtitle = glue::glue(""),
+       caption = " ") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10),
+                     labels = function(x) {scales::percent(x, accuracy = 1)}) + th +
+  geom_smooth(method="lm", se = F, color="black") +
+  annotate(
+    geom = "text",
+    size = 10,
+    x = 1.25,
+    y = .30,
+    label = latex2exp::TeX(r'($R^{2}$ = 0.5104)')
+  ) 
+  
+
+ggplot2::ggsave(
+  filename = "../viz/1.png",
+  height = 8,
+  width = 8*asp_ratio,
+  dpi = "retina"
+)
+```
+
+```{r}
+r2 <- cor(d$defensive_shot_quality, d$actual_win_percentage)*cor(d$defensive_shot_quality, d$actual_win_percentage)
+r2
+
+d %>%
+  ggplot(aes(x = defensive_shot_quality,
+             y = actual_win_percentage)) +
+  ggimage::geom_image(aes(image = logo),
+                      size = 0.03, by = "width", asp = asp_ratio) +
+  labs(x = "Defensive ShotQuality",
+       y = "Win %",
+       title = "2021-2022 Season",
+       subtitle = glue::glue(""),
+       caption = "@Shot_Quality") +
+  scale_x_reverse(breaks = scales::pretty_breaks(n = 10)) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10),
+                     labels = function(x) {scales::percent(x, accuracy = 1)}) + th +
+  geom_smooth(method="lm", se = F, color="black") +
+  annotate(
+    geom = "text",
+    size = 10,
+    x = 0.925,
+    y = .2250,
+    label = latex2exp::TeX(r'($R^{2}$ = 0.4162)')
+  ) +
+  theme(plot.title = element_text(hjust = 1))  
+  
+
+ggplot2::ggsave(
+  filename = "../viz/2.png",
+  height = 8,
+  width = 8*asp_ratio,
+  dpi = "retina"
+)
+```
+
+
+```{r}
+# Put them together
+img1 <- magick::image_read("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/1.png")
+img2 <- magick::image_read("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/2.png")
+img3 <- magick::image_append(c(img1, img2))
+
+magick::image_write(image = img3,
+                    path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/3.png",
+                    format = 'png')
+
+knitr::include_graphics("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/3.png")
+
+```
+
+
+```{r}
+n <- "C:/Users/Myles/Downloads/Shot Quality Bets Tracking Spreadsheet - Games.csv" %>%
+  readr::read_csv() %>%
+  janitor::clean_names()
+n <- dim(n)
+n
+
+d <- "C:/Users/Myles/Downloads/Shot Quality Bets Tracking Spreadsheet - Games.csv" %>%
+  readr::read_csv() %>%
+  janitor::clean_names() %>% 
+  group_by(date) %>%
+  summarise(n = n(),
+            winnings = sum(units)) %>%
+  mutate(date = lubridate::mdy(date)) %>%
+  arrange(date) %>%
+  mutate(heyy = cumsum(winnings))
+
+# Add in the date to start at 0
+d <- dplyr::bind_rows(tibble(date = lubridate::ymd("2021-11-08"), n = 1, winnings = 0, heyy = 0),
+                      d)
+
+d
+
+d %>%
+  ggplot(aes(x = date, y = heyy)) + geom_line(size = 1.3, color = "green4", fill = "green4") + th + 
+  geom_point(aes(size = n), color = "green4", fill = "green4") +
+  scale_color_identity(aesthetics =  c("fill", "color")) +
+  labs(x = "Date",
+       y = "Units",
+       title = "ShotQualityBets Model Returns",
+       subtitle = glue::glue("NCAAB 2021-2022, n = {n[1]}"),
+       caption = "@Shot_Quality, Dot size represents # of bets placed on a given day",
+       color = "",
+       size = "") +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  theme(legend.position="top",
+        legend.title=element_blank()) + 
+  guides(color = "none") # Removing legend title for color
+
+
+ggplot2::ggsave(
+  filename = "../viz/1.png",
+  height = 8,
+  width = 8*asp_ratio,
+  dpi = "retina"
+)
+```
+
+ACC Conference Tournament games:
+```{r}
+d <- running_player %>%
+  left_join(ncaa_logos) %>%
+  filter(conference %in% power_five_names[1]) %>% # ACC
+  arrange(-points)
+
+d
+```
+
+
+```{r}
+gt <- d %>%
+  mutate_at(c("sq_ppp", "sq_points"), function(x) {round(x, 2)}) %>%
+  select(logo, players, date, possessions, points, sq_points, sq_ppp, good_pos_rate) %>%
+  dplyr::slice(1:20) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = as.character(.x),
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    players = "",
+    date = "",
+    points = " Actual Points",
+    sq_points = "Expected Points",
+    possessions = "Possessions",
+    good_pos_rate = "Good Possession Rate",
+    sq_ppp = "SQ PPP"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**Top Scoring Performances: What were the Quality of Possessions?**"),
+             subtitle = md(glue::glue("February 2022"))) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(good_pos_rate),
+    colors = scales::col_numeric(
+      domain = domain1,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(possessions:good_pos_rate)) %>%
+  tab_spanner(
+    label = "Player",
+    columns = c(logo:date)) %>%
+  # Fixing column widths
+  cols_width(
+    players ~ gt::px(200),
+    possessions ~ gt::px(115),
+    logo ~ gt::px(40),
+    date ~ gt::px(120),
+    good_pos_rate ~ gt::px(130),
+    gt::everything() ~ gt::px(75)
+  ) %>%
+  # Fixing column names to be 'centered'
+  cols_align(
+  align = c("center"), columns = everything()) %>%
+  # Format percents for the rate stat
+  gt::fmt_percent(
+  columns = good_pos_rate,
+  rows = everything(),
+  decimals = 1) %>%
+  # Make each row the same height
+  tab_options(data_row.padding = gt::px(4))
+
+gt
+
+gt::gtsave(data = gt,
+           filename = "1.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+ACC Conference Season wrap up
+
+```{r}
+selected_conference <- "ACC"
+
+left <- team_accurate_game_stats %>%
+  arrange(game_id, teams) %>%
+  slice(seq(1, 10000, by = 2)) %>%
+  left_join(ncaa_teams)
+
+right <- team_accurate_game_stats %>%
+  arrange(game_id, desc(teams)) %>%
+  slice(seq(1, 10000, by = 2)) %>%
+  left_join(ncaa_teams)
+
+left
+right
+
+join <- full_join(left, right, by = c("game_id"))
+
+join
+
+conf_games <- join %>%
+  filter(conference.x == selected_conference & conference.y == selected_conference) %>%
+  select(-game_id)
+
+lower <- conf_games %>%
+  select(teams.x:logo.x)
+
+upper <- conf_games %>%
+  select(teams.y:logo.y)
+
+new_names <- str_remove_all(colnames(upper), ".y")
+
+colnames(lower) <- new_names
+colnames(upper) <- new_names
+
+concat <- dplyr::bind_rows(lower, upper) %>%
+  arrange(desc(date))
+
+concat
+
+d <- concat %>%
+  group_by(teams) %>%
+  summarise(o1 = mean(points_expected),
+            o2 = mean(points_scored),
+            o3 = mean(points_difference),
+            o4 = mean(sq_ppp)) %>%
+  rename(points_expected = o1,
+         points_scored = o2,
+         points_difference = o3,
+         sq_ppp = o4) %>%
+  arrange(desc(sq_ppp))
+
+d
+```
+
+```{r}
+gt <- d %>%
+  left_join(ncaa_teams) %>%
+  select(logo, teams, points_expected, points_scored, points_difference, sq_ppp) %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = .x,
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    teams = "",
+    points_expected = "Expected",
+    points_scored = "Actual",
+    points_difference = "Difference",
+    sq_ppp = "SQ PPP"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**ShotQuality discrepancies by Team**"),
+             subtitle = md(glue::glue("{selected_conference} Conference Season"))) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(sq_ppp),
+    colors = scales::col_numeric(
+      domain = c(quantile(team_accurate_game_stats$sq_ppp, c(lower_bound)),
+                 quantile(team_accurate_game_stats$sq_ppp, c(upper_bound))),
+      alpha = .90,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(points_expected:sq_ppp)
+  ) %>%
+  tab_spanner(
+    label = "Team",
+    columns = c(logo:teams)
+  )
+
+gt
+
+gt::gtsave(data = gt,
+           filename = "2.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+Best performances of conference tournament season:
+
+```{r}
+d <- running_player %>%
+  left_join(ncaa_logos) %>%
+  filter(date >= "2022-03-08") %>%
+  arrange(-points)
+
+d
+```
+
+
+```{r}
+gt <- d %>%
+  mutate_at(c("sq_ppp", "sq_points"), function(x) {round(x, 2)}) %>%
+  select(logo, players, date, possessions, points, sq_points, sq_ppp, good_pos_rate) %>%
+  dplyr::slice(1:20) %>%
+  gt() %>%
+  text_transform(
+      locations = cells_body(c(logo)),
+      fn = function(x) {
+        purrr::map_chr(x, ~ local_image(
+          filename = as.character(.x),
+          height = 30
+        ))}) %>%
+  cols_label(
+    logo = "",
+    players = "",
+    date = "",
+    points = " Actual Points",
+    sq_points = "Expected Points",
+    possessions = "Possessions",
+    good_pos_rate = "Good Possession Rate",
+    sq_ppp = "SQ PPP"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**Top Scoring Performances: What were the Quality of Possessions?**"),
+             subtitle = md(glue::glue("Conference Tournament Games"))) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(good_pos_rate),
+    colors = scales::col_numeric(
+      domain = c(0, 1),
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(possessions:good_pos_rate)) %>%
+  tab_spanner(
+    label = "Player",
+    columns = c(logo:date)) %>%
+  # Fixing column widths
+  cols_width(
+    players ~ gt::px(200),
+    possessions ~ gt::px(115),
+    logo ~ gt::px(40),
+    date ~ gt::px(120),
+    good_pos_rate ~ gt::px(130),
+    gt::everything() ~ gt::px(75)
+  ) %>%
+  # Fixing column names to be 'centered'
+  cols_align(
+  align = c("center"), columns = everything()) %>%
+  # Format percents for the rate stat
+  gt::fmt_percent(
+  columns = good_pos_rate,
+  rows = everything(),
+  decimals = 1) %>%
+  # Make each row the same height
+  tab_options(data_row.padding = gt::px(4))
+
+gt
+
+gt::gtsave(data = gt,
+           filename = "1.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+
+
+
+
+
+
+
+
+

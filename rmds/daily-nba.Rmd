@@ -1,0 +1,496 @@
+---
+title: "Untitled"
+author: "Myles Thomas"
+date: "1/11/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+yesterday <- lubridate::today() - 1
+
+team %>%
+  filter(date == yesterday) %>%
+  mutate(points_difference = points_expected - points_scored,
+         new = abs(points_difference)) %>%
+  arrange(desc(new)) 
+
+player %>%
+  filter(date == yesterday) %>%
+  mutate(new = abs(points_difference)) %>%
+  arrange(desc(new))
+```
+
+Looking at each team's most recent game:
+
+```{r}
+matchup <- c("Golden State Warriors", "Milwaukee Bucks")
+
+d <- team %>%
+  filter(teams %in% matchup) %>%
+  arrange(teams) %>%
+  group_by(teams) %>%
+  mutate(num = dplyr::row_number()) %>%
+  filter(num %in% 1) %>%
+  ungroup() %>%
+  left_join(nba_team_logos) %>%
+  select(logo, teams,
+         sq_ppp,
+         points_expected, points_scored,
+         x3pt_fg_percent_expected, x3pt_fg_percent,
+         midrange_fg_percent_expected, midrange_fg_percent,
+         free_throw_percent_expected, free_throw_percent,
+         point_differential_team) 
+
+d[, 12] <- -8
+d[2, 12] <- -4
+
+
+d
+```
+
+
+
+
+
+
+Pistons have crazy shooting night - top 15 above expectation team shooting nights:
+
+```{r}
+# getting quartile values for a game's outcome
+lower_bound <- .05
+upper_bound <- .95
+
+quantile(team$points_scored, c(.01, lower_bound, .5, upper_bound, .99))
+
+```
+
+```{r}
+d <- team %>%
+  mutate(points_difference = points_expected - points_scored,
+         new = abs(points_difference)) %>%
+  arrange(points_difference) %>%
+  slice(1:15) %>% 
+  left_join(nba_teams) %>%
+  select(logo, teams, date, opponent, points_expected, points_scored, point_differential_team)
+
+d
+```
+```{r}
+gt1 <- d %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  text_transform(
+    locations = cells_body(c(logo)),
+    fn = function(x) {
+      web_image(url = x, height = gt::px(30))}) %>%
+  cols_label(logo="", 
+             teams="Team",
+             date="Date",
+             opponent="Opponent",
+              points_expected="Expected Points", 
+              points_scored="Points",
+             point_differential_team = "Margin of Victory") %>%
+  tab_source_note(source_note = md("<br>Figure: @Shot_Quality"))  %>%
+  tab_header(title = md("**Best team performances relative to expectation**"),
+             subtitle = md("1/11/2022")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(points_expected),
+    colors = scales::col_numeric(domain = c(86, 127),
+                                 alpha = .95, palette = c("#ff2700", "#f8fcf8", "#44ab43"))) %>%
+  
+  data_color(
+    columns = c(points_scored),
+    colors = scales::col_numeric(domain = c(65, 155),
+                                 alpha = .95, palette = c("#ff2700", "#f8fcf8", "#44ab43"))) %>%
+  data_color(
+    columns = c(point_differential_team),
+    colors = scales::col_numeric(domain = c(-73, 73),
+                                 alpha = .95, palette = c("#ff2700", "#f8fcf8", "#44ab43"))) %>%
+  tab_spanner(
+    label = "Performance",
+    columns = c(points_expected:point_differential_team)
+  ) 
+
+
+gt1
+
+gt::gtsave(data = gt1,
+           filename = "teams-playing-over-head.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+
+Players playing over exp yesterday:
+
+```{r}
+### Fix names that didn't get joined on bc name issues:
+headshots %>%
+  arrange(players)
+```
+
+
+
+```{r}
+d <- player %>%
+  filter(date == yesterday) %>%
+  mutate(points_difference = points_expected - points_scored,
+         new = abs(points_difference)) %>%
+  arrange(points_difference) %>%
+  filter(points_scored > 5) %>%
+  left_join(nba_logos) %>%
+  left_join(headshots) %>%
+  slice(1:15)
+
+d
+```
+
+
+
+```{r}
+# FIX:
+
+# Looking at players who didn't join correctly:
+d %>%
+  filter(is.na(headshot))
+
+# Copy/Paste the INCORRECT players names from down below who have NA in columns after the join
+old_list <- c("Fred Vanvleet", "Lamelo Ball", "Cameron Reddish", "Demar Derozan",
+           "Marcus Morris Sr", "Zach Lavine", "Caris Levert", "Rj Barrett",
+           "Jaden Mcdaniels", "Doug Mcdermott", "P.J Washington", "Jordan Mclaughlin",
+           "Marcus Morris Sr", "Og Anunoby")
+
+# Find players CORRECT name/spelling in excel file, or from code chunk above this, copy paste that in here
+new_list <- c("Fred VanVleet", "LaMelo Ball", "Cam Reddish", "DeMar DeRozan",
+              "Marcus Morris Sr.", "Zach LaVine", "Caris LeVert", "RJ Barrett",
+              "Jalen McDaniels", "Doug McDermott", "P.J. Washington", "Jordan McLaughlin",
+              "Marcus Morris Sr.", "OG Anunoby")
+
+# Changing names (Make sure you go high enough == length of old_list, new_list)
+d <- d %>%
+  mutate(players = case_when(
+    players == old_list[1] ~ new_list[1],
+    players == old_list[2] ~ new_list[2],
+    players == old_list[3] ~ new_list[3],
+    players == old_list[4] ~ new_list[4],
+    players == old_list[5] ~ new_list[5],
+    players == old_list[6] ~ new_list[6],
+    players == old_list[7] ~ new_list[7],
+    players == old_list[8] ~ new_list[8],
+    players == old_list[9] ~ new_list[9],
+    players == old_list[10] ~ new_list[10],
+    players == old_list[11] ~ new_list[11],
+    players == old_list[12] ~ new_list[12],
+    players == old_list[13] ~ new_list[13],
+    players == old_list[14] ~ new_list[14],
+    TRUE ~ as.character(players)
+  ))
+
+
+# Re-run code before proceeding (check: this should be empty)
+d %>%
+  filter(players %in% old_list)
+
+### Go back and re-run code for 'd' to fix the NA's in headshot ###
+d <- d %>%
+  select(-headshot) %>%
+  left_join(headshots, by = c("players"))
+
+d %>%
+  select(players, headshot)
+```
+
+
+```{r}
+gt <- d %>%
+  select(logo, headshot, players, points_expected, points_scored, points_difference) %>%
+  gt() %>%
+  text_transform(
+    locations = cells_body(c(logo)),
+    fn = function(x) {
+      web_image(
+        url = x,
+        height = gt::px(30))}) %>%
+  text_transform(
+    locations = cells_body(c(headshot)),
+    fn = function(x) {
+      web_image(
+        url = x,
+        height = gt::px(30))}) %>%
+  cols_label(
+    logo = "",
+    headshot = "",
+    players = "",
+    points_expected = "Expected",
+    points_scored = "Actual",
+    points_difference = "Difference"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**ShotQuality discrepancies by Player**"),
+             subtitle = md(glue::glue("Games played on {format(yesterday, '%m-%d-%y')}"))) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(points_difference),
+    colors = scales::col_numeric(
+      domain = c(-15, 15),
+      alpha = .95,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(points_expected:points_difference)
+  ) %>%
+  tab_spanner(
+    label = "Player",
+    columns = c(logo:players)
+  )
+
+gt
+
+gt::gtsave(data = gt,
+           filename = "playing-over-head.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+
+3PT Made O/U
+
+
+```{r}
+d <- player %>%
+  filter(date == yesterday) %>%
+  left_join(nba_logos) %>%
+  mutate(x3pt_makes_expected = x3pt_fg_percent_expected*x3pt_attempts,
+         x3pt_makes_scored = x3pt_fg_percent*x3pt_attempts,
+         x3pt_makes_difference = x3pt_makes_expected - x3pt_makes_scored) %>%
+  arrange(x3pt_makes_difference) %>%
+  dplyr::slice(1:15)
+
+d
+```
+
+
+
+```{r}
+gt <- d %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  select(-c(points_expected, points_scored, points_difference)) %>%
+  rename(points_expected = x3pt_makes_expected,
+         points_scored = x3pt_makes_scored,
+         points_difference = x3pt_makes_difference) %>%
+  select(logo, players, points_expected:points_difference) %>%
+  gt() %>%
+  text_transform(
+    locations = cells_body(c(logo)),
+    fn = function(x) {
+      web_image(url = x, height = gt::px(30))}) %>%
+  cols_label(
+    logo = "",
+    players = "",
+    points_expected = "Expected",
+    points_scored = "Actual",
+    points_difference = "Difference"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**ShotQuality discrepancies: 3PT Made**"),
+             subtitle = md(glue::glue("Games played on {format(yesterday, '%m-%d-%y')}"))) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(points_difference),
+    colors = scales::col_numeric(
+      domain = c(-5, 5),
+      alpha = .85,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(points_expected:points_difference)
+  ) %>%
+  tab_spanner(
+    label = "Player",
+    columns = c(logo:players)
+  )
+
+gt
+
+gt::gtsave(data = gt,
+           filename = "nba-3pt-shooting.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+
+
+Player regression candidates: last month
+
+```{r}
+d <- player %>%
+  filter(date >= "2022-01-01" & date <= "2022-01-31") %>%
+  group_by(logos, players) %>%
+  summarise(n = n(),
+    o1 = sum(points_expected),
+    o2 = sum(points_scored),
+    o3 = sum(points_difference)) %>%
+  rename(points_expected = o1,
+         points_scored = o2,
+         points_difference = o3) %>%
+  ungroup() %>%
+  arrange(desc(points_difference)) %>%
+  left_join(nba_logos) %>%
+  filter(points_scored > 125)
+
+d
+```
+
+
+```{r}
+g <- d %>%
+  arrange(desc(points_difference)) %>%
+  slice(1:20)
+
+b <- d %>%
+  arrange(points_difference) %>%
+  slice(1:20)
+
+g
+b
+```
+
+
+```{r}
+domain <- 100
+
+gt <- g %>%
+  select(logo, players, n, points_expected, points_scored, points_difference) %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  text_transform(
+    locations = cells_body(c(logo)),
+    fn = function(x) {
+      web_image(url = x, height = gt::px(30))}) %>%
+  cols_label(
+    logo = "",
+    players = "",
+    n = "n",
+    points_expected = "Expected",
+    points_scored = "Actual",
+    points_difference = "Difference"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**ShotQuality discrepancies by Player**"),
+             subtitle = md("")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(points_difference),
+    colors = scales::col_numeric(
+      domain = c(-domain, domain),
+      alpha = .95,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(n:points_difference)
+  ) %>%
+  tab_spanner(
+    label = "Player",
+    columns = c(logo:players)
+  )
+
+gt
+
+gt2 <- b %>%
+  select(logo, players, n, points_expected, points_scored, points_difference) %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  text_transform(
+    locations = cells_body(c(logo)),
+    fn = function(x) {
+      web_image(url = x, height = gt::px(30))}) %>%
+  cols_label(
+    logo = "",
+    players = "",
+    n = "n",
+    points_expected = "Expected",
+    points_scored = "Actual",
+    points_difference = "Difference"
+  ) %>%
+  tab_source_note(
+    source_note = md("")
+  )  %>%
+  tab_header(title = md("**January 2022**"),
+             subtitle = md("")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(points_difference),
+    colors = scales::col_numeric(
+      domain = c(-domain, domain),
+      alpha = .95,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) %>%
+  tab_spanner(
+    label = "ShotQuality Metrics",
+    columns = c(n:points_difference)
+  ) %>%
+  tab_spanner(
+    label = "Player",
+    columns = c(logo:players)
+  ) %>%
+    opt_table_font(font = list(default_fonts())) %>%
+  tab_style(
+    style = cell_borders(
+      sides = "left",
+      color = "black",
+      weight = px(3)),
+    locations = list(cells_body(columns = 1),
+                     cells_column_labels(1))) %>%
+    tab_options(
+      column_labels.background.color = "white",
+      column_labels.font.weight = "bold",
+      table.border.top.width = px(3),
+      table.border.top.color = "transparent",
+      table.border.bottom.color = "transparent",
+      table.border.bottom.width = px(3),
+      column_labels.border.top.width = px(3),
+      column_labels.border.top.color = "transparent",
+      column_labels.border.bottom.width = px(3),
+      column_labels.border.bottom.color = "black",
+      data_row.padding = px(3),
+      source_notes.font.size = 12,
+      table.font.size = 16,
+      heading.align = "right"
+    )
+
+gt2
+
+gt::gtsave(data = gt,
+           filename = "left.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+
+gt::gtsave(data = gt2,
+           filename = "right.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+
+img1 <- magick::image_read("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/left.png")
+img2 <- magick::image_read("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/right.png")
+img3 <- magick::image_append(c(img1, img2))
+
+magick::image_write(image = img3,
+                    path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/players-side-to-side.png",
+                    format = 'png')
+
+knitr::include_graphics("C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz/players-side-to-side.png")
+```
+
+
+

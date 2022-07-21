@@ -1,0 +1,55 @@
+---
+title: "Untitled"
+author: "Myles Thomas"
+date: "1/18/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+```{r}
+team <- readr::read_csv("../data/ncaa/s3/RUNNING_Adj_full_team_stats.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::mutate(date = lubridate::dmy(date)) %>%
+  arrange(desc(date))
+
+yesterday <- lubridate::today() - 1
+
+d <- team %>%
+  filter(date == yesterday) %>%
+  mutate(points_difference = sq_points - points,
+         new = abs(points_difference)) %>%
+  left_join(ncaa_logos) %>%
+  arrange(desc(new)) %>%
+  rename(points_expected = sq_points,
+         points_scored = points)
+
+d
+```
+
+
+```{r}
+#team <- 
+readr::read_csv("../data/nba/s3/RUNNING_Adj_full_team_stats.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::mutate(date = lubridate::dmy(date)) %>%
+  arrange(desc(date))
+
+yesterday <- lubridate::today() - 1
+
+d <- team %>%
+  filter(date == yesterday) %>%
+  mutate(points_difference = sq_points - points,
+         new = abs(points_difference)) %>%
+  left_join(ncaa_logos) %>%
+  arrange(desc(new)) %>%
+  rename(points_expected = sq_points,
+         points_scored = points)
+
+d
+```

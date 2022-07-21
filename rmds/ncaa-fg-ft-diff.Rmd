@@ -1,0 +1,212 @@
+---
+title: "Untitled"
+author: "Myles Thomas"
+date: "1/12/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+left <- team %>%
+  arrange(game_id, teams) %>%
+  slice(seq(1, 10000, by = 2)) %>%
+  left_join(ncaa_teams)
+
+right <- team %>%
+  arrange(game_id, desc(teams)) %>%
+  slice(seq(1, 10000, by = 2)) %>%
+  left_join(ncaa_teams)
+
+left ; right
+
+join <- full_join(left, right, by = c("game_id"))
+
+join
+
+d <- join %>%
+  filter((conference.x %in% power_five_names & conference.y %in% power_five_names) |
+           (!(conference.x %in% power_five_names) & !(conference.y %in% power_five_names))) %>%
+  mutate(fg_diff = shot_attempts.x - shot_attempts.y,
+         ft_diff = free_throw_attempts.x - free_throw_attempts.y,
+         ft_diff2 = ft_diff*2,
+         combination = fg_diff + ft_diff2,
+         game_pd = points_scored.x - points_scored.y) %>%
+  select(teams.x, teams.y, fg_diff:game_pd) %>%
+  mutate(fixed_fg_diff = ifelse(fg_diff < 0, fg_diff*-1, fg_diff),
+         fixed_game_pd = ifelse(fg_diff < 0, game_pd*-1, game_pd),
+         win1 = ifelse(fixed_game_pd > 0, 1, 0)) %>%
+  mutate(fixed_ft_diff = ifelse(ft_diff2 < 0, ft_diff2*-1, ft_diff2),
+         fixed_game_pd2 = ifelse(ft_diff2 < 0, game_pd*-1, game_pd),
+         win2 = ifelse(fixed_game_pd2 > 0, 1, 0)) %>%
+  mutate(fixed_combination = ifelse(combination < 0, combination*-1, combination),
+         fixed_game_pd3 = ifelse(combination < 0, game_pd*-1, game_pd),
+         win3 = ifelse(fixed_game_pd3 > 0, 1, 0)) 
+  
+
+d
+```
+
+
+
+Shot attempts:
+
+```{r}
+summary(d$fixed_fg_diff)
+```
+
+
+```{r}
+d2 <- d %>%
+  mutate(bins = cut(fixed_fg_diff, c(-1, seq(0, 25, 5)))) %>%
+  group_by(bins) %>%
+  summarise(n = n(),
+            win = mean(win1),
+            avg_game_pd = mean(fixed_game_pd)) %>%
+  arrange(desc(n)) %>%
+  filter(bins != "(-1,0]")
+
+d2
+```
+
+
+```{r}
+gt1 <- d2 %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  cols_label(
+    bins = "Bin",
+    n = "# Games",
+    win = "Win %",
+    avg_game_pd = "Point Differential (avg.)"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**Point Differential by bin of FG Attempt Difference**"),
+             subtitle = md("")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(avg_game_pd),
+    colors = scales::col_numeric(
+      domain = c(-10, 10),
+      alpha = .95,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) 
+
+gt1
+
+gt::gtsave(data = gt1,
+           filename = "1.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+
+
+
+
+FT Only:
+
+
+
+```{r}
+d2 <- d %>%
+  mutate(bins = cut(fixed_ft_diff, c(-1, seq(0, 25, 5)))) %>%
+  group_by(bins) %>%
+  summarise(n = n(),
+            win = mean(win2),
+            avg_game_pd = mean(fixed_game_pd2)) %>%
+  arrange(desc(n)) %>%
+  filter(bins != "(-1,0]") %>%
+  slice(c(2, 1, 4, 3, 5))
+
+d2
+```
+
+
+```{r}
+gt2 <- d2 %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  cols_label(
+    bins = "Bin",
+    n = "# Games",
+    win = "Win %",
+    avg_game_pd = "Point Differential (avg.)"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**Point Differential by bin of FT Attempt Difference**"),
+             subtitle = md("")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(avg_game_pd),
+    colors = scales::col_numeric(
+      domain = c(-10, 10),
+      alpha = .95,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) 
+
+gt2
+
+gt::gtsave(data = gt2,
+           filename = "2.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
+
+
+Combination:
+
+
+
+```{r}
+d2 <- d %>%
+  mutate(bins = cut(fixed_combination, c(-1, seq(0, 25, 5)))) %>%
+  group_by(bins) %>%
+  summarise(n = n(),
+            win = mean(win3),
+            avg_game_pd = mean(fixed_game_pd3)) %>%
+  arrange(desc(n)) %>%
+  filter(bins != "(-1,0]")
+
+d2
+```
+
+
+```{r}
+gt3 <- d2 %>%
+  mutate_if(is.numeric, function(x) {round(x, 2)}) %>%
+  gt() %>%
+  cols_label(
+    bins = "Bin",
+    n = "# Games",
+    win = "Win %",
+    avg_game_pd = "Point Differential (avg.)"
+  ) %>%
+  tab_source_note(
+    source_note = md("<br>Figure: @Shot_Quality")
+  )  %>%
+  tab_header(title = md("**Point Differential by bin of FG + FT Attempt Difference**"),
+             subtitle = md("")) %>%
+  gt_theme_538() %>%
+  data_color(
+    columns = c(avg_game_pd),
+    colors = scales::col_numeric(
+      domain = c(-10, 10),
+      alpha = .95,
+      palette = c("#ff2700", "#f8fcf8", "#44ab43")  
+    )) 
+
+gt3
+
+gt::gtsave(data = gt3,
+           filename = "3.png",
+           path = "C:/Users/Myles/OneDrive/Documents/GitHubThings/ShotQualityResearch/viz")
+```
+
